@@ -39,7 +39,7 @@ export class Driver {
   @Column()
   phoneNumber!: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   email?: string | null;
 
   @Column({ type: 'date' })
@@ -48,7 +48,7 @@ export class Driver {
   @Column({ type: 'varchar', length: 32, default: DriverStatus.ACTIVE })
   status!: DriverStatus;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   assignedVehicleId?: string | null;
 
   @ManyToOne(() => Vehicle, { nullable: true, onDelete: 'SET NULL' })

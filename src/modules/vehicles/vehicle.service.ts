@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsWhere, Repository } from 'typeorm';
 
 import { VehicleStatus } from '../../common/enums';
 import {
@@ -18,7 +18,7 @@ export class VehicleService {
   ) {}
 
   async findAll(query: VehicleQueryDto = {}): Promise<Vehicle[]> {
-    const where: Partial<Record<keyof Vehicle, unknown>> = {};
+    const where: FindOptionsWhere<Vehicle> = {};
     if (query.status) where.status = query.status;
     if (query.type) where.type = query.type;
     if (query.site) where.assignedSite = query.site;

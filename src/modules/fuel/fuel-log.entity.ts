@@ -41,7 +41,7 @@ export class FuelLog {
   @Column({ type: 'float' })
   odometerReading!: number;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamptz' })
   fillDate!: Date;
 
   @Column({ type: 'varchar', nullable: true })

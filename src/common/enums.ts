@@ -52,3 +52,21 @@ export enum LicenseClass {
   E = 'E',
   HEAVY_EQUIPMENT = 'HEAVY_EQUIPMENT',
 }
+
+export enum SiteStatus {
+  PLANNING = 'PLANNING',
+  ACTIVE = 'ACTIVE',
+  ON_HOLD = 'ON_HOLD',
+  COMPLETED = 'COMPLETED',
+  CLOSED = 'CLOSED',
+}
+
+export enum SiteType {
+  CONSTRUCTION = 'CONSTRUCTION',
+  MINING = 'MINING',
+  INFRASTRUCTURE = 'INFRASTRUCTURE',
+  DEMOLITION = 'DEMOLITION',
+  QUARRY = 'QUARRY',
+  DEPOT = 'DEPOT',
+  OTHER = 'OTHER',
+}

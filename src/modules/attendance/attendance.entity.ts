@@ -21,7 +21,7 @@ export class Attendance {
   @Column()
   employeeId!: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'uuid', nullable: true })
   vehicleId?: string | null;
 
   @ManyToOne(() => Vehicle, (vehicle) => vehicle.attendanceRecords, {
@@ -37,10 +37,10 @@ export class Attendance {
   @Column({ type: 'varchar', length: 16, default: SiteShift.DAY })
   shift!: SiteShift;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamptz' })
   checkInTime!: Date;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   checkOutTime?: Date | null;
 
   @Column({ type: 'varchar', length: 32, default: AttendanceStatus.CHECKED_IN })
