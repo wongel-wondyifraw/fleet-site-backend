@@ -70,3 +70,10 @@ export enum SiteType {
   DEPOT = 'DEPOT',
   OTHER = 'OTHER',
 }
+
+// Roles for application users (login accounts); used by RolesGuard and JWT payload.
+export enum UserRole {
+  ADMIN = 'ADMIN',
+  SITE_MANAGER = 'SITE_MANAGER',
+  TIME_KEEPER = 'TIME_KEEPER',
+}
