@@ -3,11 +3,13 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  ManyToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 
 import { SiteStatus, SiteType } from '../../common/enums';
+import { User } from '../users/user.entity';
 
 @Entity({ name: 'sites' })
 @Index(['city', 'name'])
@@ -62,6 +64,9 @@ export class Site {
 
   @Column({ type: 'text', nullable: true })
   description?: string | null;
+
+  @ManyToMany(() => User, (user) => user.sites)
+  users!: User[];
 
   @CreateDateColumn()
   createdAt!: Date;
