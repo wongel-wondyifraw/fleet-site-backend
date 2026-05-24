@@ -30,11 +30,6 @@ export class SiteController {
     return this.sites.findActive();
   }
 
-  @Get('by-code/:code')
-  findByCode(@Param('code') code: string) {
-    return this.sites.findByCode(code);
-  }
-
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.sites.findOne(id);

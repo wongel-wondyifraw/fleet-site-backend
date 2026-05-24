@@ -17,9 +17,6 @@ export class Site {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ unique: true })
-  code!: string;
-
   @Column()
   name!: string;
 
@@ -35,35 +32,8 @@ export class Site {
   @Column()
   city!: string;
 
-  @Column({ type: 'varchar', nullable: true })
-  region?: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  country?: string | null;
-
-  @Column({ type: 'float', nullable: true })
-  latitude?: number | null;
-
-  @Column({ type: 'float', nullable: true })
-  longitude?: number | null;
-
-  @Column({ type: 'date', nullable: true })
-  startDate?: Date | null;
-
-  @Column({ type: 'date', nullable: true })
-  endDate?: Date | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  managerEmployeeId?: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  contactPhone?: string | null;
-
-  @Column({ type: 'varchar', nullable: true })
-  contactEmail?: string | null;
-
-  @Column({ type: 'text', nullable: true })
-  description?: string | null;
+  @Column()
+  state!: string;
 
   @ManyToMany(() => User, (user) => user.sites)
   users!: User[];
