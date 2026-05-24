@@ -1,25 +1,18 @@
 import {
-  IsDateString,
-  IsEmail,
+  ArrayUnique,
+  IsArray,
   IsEnum,
-  IsLatitude,
-  IsLongitude,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
-  Matches,
 } from 'class-validator';
 
 import { SiteStatus, SiteType } from '../../common/enums';
 
+// Required fields for creating a site from the Settings -> Sites panel.
+// Status is optional on create: the service defaults it to PLANNING.
 export class CreateSiteDto {
-  @IsString()
-  @Length(2, 16)
-  @Matches(/^[A-Z0-9-]+$/, {
-    message: 'code must be uppercase letters, digits, or hyphens',
-  })
-  code!: string;
-
   @IsString()
   @Length(2, 128)
   name!: string;
@@ -27,56 +20,35 @@ export class CreateSiteDto {
   @IsEnum(SiteType)
   type!: SiteType;
 
+  @IsOptional()
+  @IsEnum(SiteStatus)
+  status?: SiteStatus;
+
   @IsString()
+  @Length(1, 255)
   address!: string;
 
   @IsString()
+  @Length(1, 128)
   city!: string;
 
-  @IsOptional()
   @IsString()
-  region?: string;
+  @Length(1, 128)
+  state!: string;
 
+  // Optional list of user UUIDs assigned to this site on creation.
   @IsOptional()
-  @IsString()
-  country?: string;
-
-  @IsOptional()
-  @IsLatitude()
-  latitude?: number;
-
-  @IsOptional()
-  @IsLongitude()
-  longitude?: number;
-
-  @IsOptional()
-  @IsDateString()
-  startDate?: string;
-
-  @IsOptional()
-  @IsDateString()
-  endDate?: string;
-
-  @IsOptional()
-  @IsString()
-  managerEmployeeId?: string;
-
-  @IsOptional()
-  @IsString()
-  contactPhone?: string;
-
-  @IsOptional()
-  @IsEmail()
-  contactEmail?: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  userIds?: string[];
 }
 
+// All fields optional - panel sends a full object but PATCH should tolerate partial.
 export class UpdateSiteDto {
   @IsOptional()
   @IsString()
+  @Length(2, 128)
   name?: string;
 
   @IsOptional()
@@ -89,53 +61,29 @@ export class UpdateSiteDto {
 
   @IsOptional()
   @IsString()
+  @Length(1, 255)
   address?: string;
 
   @IsOptional()
   @IsString()
+  @Length(1, 128)
   city?: string;
 
   @IsOptional()
   @IsString()
-  region?: string | null;
+  @Length(1, 128)
+  state?: string;
 
+  // When provided, replaces the full set of assigned users.
+  // Pass [] to clear all assignments; omit to leave them untouched.
   @IsOptional()
-  @IsString()
-  country?: string | null;
-
-  @IsOptional()
-  @IsLatitude()
-  latitude?: number | null;
-
-  @IsOptional()
-  @IsLongitude()
-  longitude?: number | null;
-
-  @IsOptional()
-  @IsDateString()
-  startDate?: string | null;
-
-  @IsOptional()
-  @IsDateString()
-  endDate?: string | null;
-
-  @IsOptional()
-  @IsString()
-  managerEmployeeId?: string | null;
-
-  @IsOptional()
-  @IsString()
-  contactPhone?: string | null;
-
-  @IsOptional()
-  @IsEmail()
-  contactEmail?: string | null;
-
-  @IsOptional()
-  @IsString()
-  description?: string | null;
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  userIds?: string[];
 }
 
+// Query filters supported by GET /sites.
 export class SiteQueryDto {
   @IsOptional()
   @IsEnum(SiteStatus)
