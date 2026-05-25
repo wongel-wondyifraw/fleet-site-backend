@@ -1,11 +1,9 @@
 import {
   IsEnum,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
   Length,
-  Max,
   Min,
 } from 'class-validator';
 
@@ -16,17 +14,6 @@ export class CreateVehicleDto {
   @Length(2, 16)
   plateNumber!: string;
 
-  @IsString()
-  make!: string;
-
-  @IsString()
-  model!: string;
-
-  @IsInt()
-  @Min(1950)
-  @Max(new Date().getFullYear() + 1)
-  year!: number;
-
   @IsEnum(VehicleType)
   type!: VehicleType;
 
@@ -36,6 +23,12 @@ export class CreateVehicleDto {
   @IsNumber()
   @Min(0)
   fuelCapacity!: number;
+
+  // Fuel economy in km/L. Optional - defaults to 0 server-side.
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  mileage?: number;
 
   @IsOptional()
   @IsNumber()
@@ -50,15 +43,8 @@ export class CreateVehicleDto {
 export class UpdateVehicleDto {
   @IsOptional()
   @IsString()
-  make?: string;
-
-  @IsOptional()
-  @IsString()
-  model?: string;
-
-  @IsOptional()
-  @IsInt()
-  year?: number;
+  @Length(2, 16)
+  plateNumber?: string;
 
   @IsOptional()
   @IsEnum(VehicleType)
@@ -76,6 +62,11 @@ export class UpdateVehicleDto {
   @IsNumber()
   @Min(0)
   fuelCapacity?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  mileage?: number;
 
   @IsOptional()
   @IsNumber()
