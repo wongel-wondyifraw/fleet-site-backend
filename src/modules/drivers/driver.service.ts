@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, LessThanOrEqual, Repository } from 'typeorm';
@@ -18,12 +19,16 @@ import {
 import { Driver } from './driver.entity';
 
 @Injectable()
-export class DriverService {
+export class DriverService implements OnModuleInit {
   constructor(
     @InjectRepository(Driver)
     private readonly repo: Repository<Driver>,
     private readonly vehicles: VehicleService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.backfillMissingEmployeeIds();
+  }
 
   async findAll(query: DriverQueryDto = {}): Promise<Driver[]> {
     const baseWhere: FindOptionsWhere<Driver> = {};
@@ -81,14 +86,19 @@ export class DriverService {
   }
 
   async create(dto: CreateDriverDto): Promise<Driver> {
-    await this.ensureUnique(dto.employeeId, dto.licenseNumber);
+    await this.ensureUnique(undefined, dto.licenseNumber);
 
     if (dto.assignedVehicleId) {
       await this.vehicles.findOne(dto.assignedVehicleId);
     }
 
+    // Employee IDs are server-issued (EMP-001, EMP-002, ...) so the UI
+    // doesn't have to guess. Matches how vehicle asset numbers work.
+    const employeeId = await this.nextEmployeeId();
+
     const driver = this.repo.create({
       ...dto,
+      employeeId,
       licenseExpiry: new Date(dto.licenseExpiry),
       hireDate: new Date(dto.hireDate),
       status: DriverStatus.ACTIVE,
@@ -170,6 +180,35 @@ export class DriverService {
           `Driver with license number ${licenseNumber} already exists`,
         );
       }
+    }
+  }
+
+  // Compute the next EMP-NNN employee id by parsing every existing one.
+  // We scan instead of relying on string ordering because "EMP-100" sorts
+  // before "EMP-99" lexicographically, which would break sequencing once
+  // we cross the 99 -> 100 boundary.
+  private async nextEmployeeId(): Promise<string> {
+    const existing = await this.repo.find({ select: { employeeId: true } });
+    let max = 0;
+    for (const d of existing) {
+      const match = d.employeeId?.match(/^EMP-(\d+)$/);
+      if (match) {
+        const num = Number.parseInt(match[1], 10);
+        if (Number.isFinite(num) && num > max) max = num;
+      }
+    }
+    return `EMP-${String(max + 1).padStart(3, '0')}`;
+  }
+
+  // One-shot rewrite of legacy employee ids that don't follow the EMP-NNN
+  // convention (e.g. drivers seeded manually before this change). Runs once
+  // per boot via OnModuleInit. Anything already matching is left alone.
+  private async backfillMissingEmployeeIds(): Promise<void> {
+    const drivers = await this.repo.find({ order: { createdAt: 'ASC' } });
+    for (const driver of drivers) {
+      if (driver.employeeId && /^EMP-\d+$/.test(driver.employeeId)) continue;
+      driver.employeeId = await this.nextEmployeeId();
+      await this.repo.save(driver);
     }
   }
 }

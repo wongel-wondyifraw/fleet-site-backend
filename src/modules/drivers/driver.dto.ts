@@ -12,9 +12,9 @@ import {
 import { DriverStatus, LicenseClass } from '../../common/enums';
 
 export class CreateDriverDto {
-  @IsString()
-  @Length(1, 32)
-  employeeId!: string;
+  // Employee IDs are server-issued (EMP-001, EMP-002, ...) so the UI doesn't
+  // have to guess. The field is intentionally omitted from this DTO; clients
+  // sending one will be rejected by the global validation pipe.
 
   @IsString()
   @Length(1, 64)
