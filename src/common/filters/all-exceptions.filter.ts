@@ -31,10 +31,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const stack =
       exception instanceof Error ? exception.stack : undefined;
 
-    this.logger.error(
-      `✖ ${request.method} ${request.originalUrl} ${status}${userPart} — ${message}`,
-      stack,
-    );
+    if (this.isExpected404(status, request)) {
+      this.logger.warn(
+        `✖ ${request.method} ${request.originalUrl} ${status}${userPart} — ${message}`,
+      );
+    } else {
+      this.logger.error(
+        `✖ ${request.method} ${request.originalUrl} ${status}${userPart} — ${message}`,
+        stack,
+      );
+    }
 
     const payload =
       exception instanceof HttpException
@@ -56,6 +62,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       return exception.getStatus();
     }
     return HttpStatus.INTERNAL_SERVER_ERROR;
+  }
+
+  // Misses on bot-crawled paths (favicon, robots.txt, ...) are noise, not bugs.
+  // Log them at warn level with no stack so logs stay readable.
+  private isExpected404(status: number, request: Request): boolean {
+    if (status !== 404) return false;
+    const path = request.path ?? request.originalUrl;
+    return (
+      path === '/' ||
+      path === '/favicon.ico' ||
+      path === '/robots.txt' ||
+      path === '/health'
+    );
   }
 
   private resolveMessage(exception: unknown): string {

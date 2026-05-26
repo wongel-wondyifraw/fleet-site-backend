@@ -1,5 +1,10 @@
 // ValidationPipe validates and transforms incoming DTOs.
-import { ClassSerializerInterceptor, Logger, ValidationPipe } from '@nestjs/common';
+import {
+  ClassSerializerInterceptor,
+  Logger,
+  RequestMethod,
+  ValidationPipe,
+} from '@nestjs/common';
 // Reflector is required by ClassSerializerInterceptor to read @Exclude metadata.
 import { Reflector } from '@nestjs/core';
 // NestFactory bootstraps the HTTP application.
@@ -33,8 +38,17 @@ async function bootstrap() {
   // Create the Nest application from AppModule.
   const app = await NestFactory.create(AppModule, { logger: logLevels });
 
-  // All routes are prefixed with /api (e.g. /api/auth/login).
-  app.setGlobalPrefix('api');
+  // All routes are prefixed with /api (e.g. /api/auth/login). Exclude the
+  // root and /health endpoints so Render's default health probe (which hits
+  // "/") and uptime monitors get a 200 instead of a 404.
+  app.setGlobalPrefix('api', {
+    exclude: [
+      { path: '/', method: RequestMethod.GET },
+      { path: '/', method: RequestMethod.HEAD },
+      { path: 'health', method: RequestMethod.GET },
+      { path: 'health', method: RequestMethod.HEAD },
+    ],
+  });
   // Allow browser clients (frontend) to call the API with credentials.
   app.enableCors({ origin: true, credentials: true });
 
