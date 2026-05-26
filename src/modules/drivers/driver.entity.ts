@@ -30,7 +30,7 @@ export class Driver {
   @Column({ unique: true })
   licenseNumber!: string;
 
-  @Column({ type: 'varchar', length: 32, default: LicenseClass.B })
+  @Column({ type: 'varchar', length: 32, default: LicenseClass.PUBLIC_1 })
   licenseClass!: LicenseClass;
 
   @Column({ type: 'date' })

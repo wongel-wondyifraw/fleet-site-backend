@@ -8,7 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, LessThanOrEqual, Repository } from 'typeorm';
 
-import { DriverStatus } from '../../common/enums';
+import { DriverStatus, LicenseClass } from '../../common/enums';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   AssignVehicleDto,
@@ -28,6 +28,7 @@ export class DriverService implements OnModuleInit {
 
   async onModuleInit(): Promise<void> {
     await this.backfillMissingEmployeeIds();
+    await this.backfillLegacyLicenseClasses();
   }
 
   async findAll(query: DriverQueryDto = {}): Promise<Driver[]> {
@@ -208,6 +209,29 @@ export class DriverService implements OnModuleInit {
     for (const driver of drivers) {
       if (driver.employeeId && /^EMP-\d+$/.test(driver.employeeId)) continue;
       driver.employeeId = await this.nextEmployeeId();
+      await this.repo.save(driver);
+    }
+  }
+
+  // One-shot migration from the previous A/B/C/D/E/HEAVY_EQUIPMENT license
+  // classes to the new Ethiopian PUBLIC_* / DRY_CARGO_* classes. Runs once
+  // per boot via OnModuleInit. Rows already using the new values are left
+  // alone. Best-effort mapping by "weight" - admins can adjust afterward.
+  private async backfillLegacyLicenseClasses(): Promise<void> {
+    const legacyToNew: Record<string, LicenseClass> = {
+      A: LicenseClass.PUBLIC_1,
+      B: LicenseClass.PUBLIC_2,
+      C: LicenseClass.PUBLIC_3,
+      D: LicenseClass.DRY_CARGO_1,
+      E: LicenseClass.DRY_CARGO_2,
+      HEAVY_EQUIPMENT: LicenseClass.DRY_CARGO_3,
+    };
+    const validValues = new Set<string>(Object.values(LicenseClass));
+    const drivers = await this.repo.find({ order: { createdAt: 'ASC' } });
+    for (const driver of drivers) {
+      const current = driver.licenseClass as unknown as string;
+      if (validValues.has(current)) continue;
+      driver.licenseClass = legacyToNew[current] ?? LicenseClass.PUBLIC_1;
       await this.repo.save(driver);
     }
   }

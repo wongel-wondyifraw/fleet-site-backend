@@ -44,13 +44,17 @@ export enum DriverStatus {
   TERMINATED = 'TERMINATED',
 }
 
+// Ethiopian driving license classes.
+//   PUBLIC_* (ህዝብ)    -> passenger / public-transport classes.
+//   DRY_CARGO_* (ደረቅ) -> dry-cargo / freight classes.
+// The numeric suffix (1-3) is the local rating that the license covers.
 export enum LicenseClass {
-  A = 'A',
-  B = 'B',
-  C = 'C',
-  D = 'D',
-  E = 'E',
-  HEAVY_EQUIPMENT = 'HEAVY_EQUIPMENT',
+  PUBLIC_1 = 'PUBLIC_1',
+  PUBLIC_2 = 'PUBLIC_2',
+  PUBLIC_3 = 'PUBLIC_3',
+  DRY_CARGO_1 = 'DRY_CARGO_1',
+  DRY_CARGO_2 = 'DRY_CARGO_2',
+  DRY_CARGO_3 = 'DRY_CARGO_3',
 }
 
 export enum SiteStatus {
