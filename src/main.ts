@@ -28,10 +28,11 @@ async function bootstrap() {
     new ClassSerializerInterceptor(app.get(Reflector)),
   );
 
-  // Read port from env or fall back to 3001.
+  // Read port from env or fall back to 3001. Bind to 0.0.0.0 so the API is
+  // reachable from other devices on the LAN (e.g. a phone) during development.
   const port = Number(process.env.PORT) || 3001;
-  await app.listen(port);
-  console.log(`FleetSite API listening on http://localhost:${port}/api`);
+  await app.listen(port, '0.0.0.0');
+  console.log(`FleetSite API listening on http://0.0.0.0:${port}/api`);
 }
 
 bootstrap();
