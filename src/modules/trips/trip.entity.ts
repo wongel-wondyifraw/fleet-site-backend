@@ -81,6 +81,15 @@ export class Trip {
   @Column({ type: 'timestamptz', nullable: true })
   completedAt?: Date | null;
 
+  // Distance travelled for this trip in kilometres. Populated by the
+  // client at check-in time (computed from the LocationIQ Directions
+  // API, with a haversine straight-line fallback) and then persisted
+  // here so the row stat can show the final number without recomputing
+  // every time the list is loaded. Nullable so older trips that were
+  // never checked in via the new flow keep working.
+  @Column({ type: 'float', nullable: true })
+  distanceKm?: number | null;
+
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 

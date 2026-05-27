@@ -12,8 +12,12 @@ import {
   Query,
 } from '@nestjs/common';
 
-import { TripStatus } from '../../common/enums';
-import { CreateTripDto, TripQueryDto, UpdateTripDto } from './trip.dto';
+import {
+  CreateTripDto,
+  SetTripStatusDto,
+  TripQueryDto,
+  UpdateTripDto,
+} from './trip.dto';
 import { TripService } from './trip.service';
 
 @Controller('trips')
@@ -46,14 +50,14 @@ export class TripController {
 
   // Dedicated transition endpoint used by the Trip Checkout / Check-in /
   // Cancel buttons. Kept separate from PATCH /trips/:id so the side-effects
-  // (start/complete timestamps) are explicit and never accidentally
-  // triggered by a regular field edit.
+  // (start/complete timestamps and check-in distance) are explicit and
+  // never accidentally triggered by a regular field edit.
   @Patch(':id/status')
   setStatus(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body('status') status: TripStatus,
+    @Body() body: SetTripStatusDto,
   ) {
-    return this.trips.setStatus(id, status);
+    return this.trips.setStatus(id, body.status, body.distanceKm ?? null);
   }
 
   @Delete(':id')

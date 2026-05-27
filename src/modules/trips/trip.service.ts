@@ -105,7 +105,18 @@ export class TripService {
   // (Trip Checkout / Trip Checkin / Cancel Trip). Centralises the
   // start/complete timestamp side-effects so the UI doesn't have to manage
   // them or risk drifting clocks across client devices.
-  async setStatus(id: string, next: TripStatus): Promise<Trip> {
+  //
+  // The optional `distanceKm` is honoured only for the COMPLETED
+  // transition. The client computes it via the LocationIQ Directions
+  // API at check-in time and sends it here so we can persist the final
+  // route distance with the trip record. We don't recalculate or
+  // overwrite an existing value — if a trip is already completed and
+  // has a distance, it stays as-is.
+  async setStatus(
+    id: string,
+    next: TripStatus,
+    distanceKm?: number | null,
+  ): Promise<Trip> {
     const trip = await this.findOne(id);
     if (trip.status === next) {
       return trip;
@@ -118,6 +129,18 @@ export class TripService {
     }
     trip.status = next;
     stampStatusTimestamps(trip, next);
+    if (
+      next === TripStatus.COMPLETED &&
+      typeof distanceKm === 'number' &&
+      Number.isFinite(distanceKm) &&
+      distanceKm >= 0 &&
+      // Only fill in the distance if we don't already have one — keeps
+      // an inadvertent re-check-in from clobbering an authoritative
+      // value (e.g. one set later via the regular update endpoint).
+      (trip.distanceKm === null || trip.distanceKm === undefined)
+    ) {
+      trip.distanceKm = distanceKm;
+    }
     await this.repo.save(trip);
     return this.findOne(id);
   }

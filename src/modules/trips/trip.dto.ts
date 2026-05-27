@@ -139,8 +139,25 @@ export class UpdateTripDto {
   scheduledAt?: string | null;
 
   @IsOptional()
+  @IsNumber()
+  distanceKm?: number | null;
+
+  @IsOptional()
   @IsString()
   notes?: string | null;
+}
+
+// Body for PATCH /trips/:id/status. Status is required; distanceKm is
+// optional and only honoured for the COMPLETED transition — the client
+// sends the route distance it computed when the user tapped Check-in so
+// we can persist it without having to call LocationIQ from the server.
+export class SetTripStatusDto {
+  @IsEnum(TripStatus)
+  status!: TripStatus;
+
+  @IsOptional()
+  @IsNumber()
+  distanceKm?: number | null;
 }
 
 export class TripQueryDto {
