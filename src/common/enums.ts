@@ -81,3 +81,12 @@ export enum UserRole {
   SITE_MANAGER = 'SITE_MANAGER',
   TIME_KEEPER = 'TIME_KEEPER',
 }
+
+// Lifecycle states for vehicle trips. PLANNED is the default on create;
+// IN_PROGRESS / COMPLETED / CANCELLED are set as the trip progresses.
+export enum TripStatus {
+  PLANNED = 'PLANNED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+}

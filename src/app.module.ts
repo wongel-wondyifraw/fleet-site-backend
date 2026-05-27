@@ -20,6 +20,9 @@ import { HealthModule } from './modules/health/health.module';
 // Fuel log feature module and entity.
 import { FuelLog } from './modules/fuel/fuel-log.entity';
 import { FuelModule } from './modules/fuel/fuel.module';
+// Trip feature module and entity.
+import { Trip } from './modules/trips/trip.entity';
+import { TripModule } from './modules/trips/trip.module';
 // Site feature module and entity.
 import { Site } from './modules/sites/site.entity';
 import { SiteModule } from './modules/sites/site.module';
@@ -45,7 +48,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
         const isProduction = config.get<string>('NODE_ENV') === 'production';
         const sharedOptions = {
           // Explicit entity list; User added for the new auth/users feature.
-          entities: [Vehicle, Driver, Site, User, Attendance, FuelLog],
+          entities: [Vehicle, Driver, Site, User, Attendance, FuelLog, Trip],
           // Also pick up entities registered via forFeature() in child modules.
           autoLoadEntities: true,
           // Auto-creates tables in dev; MUST be false in production.
@@ -86,6 +89,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     DriverModule,
     AttendanceModule,
     FuelModule,
+    TripModule,
     HealthModule,
   ],
 })
