@@ -45,14 +45,16 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
       inject: [ConfigService],
       useFactory: (config: ConfigService) => {
         const databaseUrl = config.get<string>('DATABASE_URL');
-        const isProduction = config.get<string>('NODE_ENV') === 'production';
         const sharedOptions = {
           // Explicit entity list; User added for the new auth/users feature.
           entities: [Vehicle, Driver, Site, User, Attendance, FuelLog, Trip],
           // Also pick up entities registered via forFeature() in child modules.
           autoLoadEntities: true,
-          // Auto-creates tables in dev; MUST be false in production.
-          synchronize: !isProduction,
+          // TEMP: keep synchronize on everywhere so newly added entities
+          // (e.g. Trip) auto-create their tables on deploy. Flip back to
+          // `!isProduction` and adopt TypeORM migrations before we have any
+          // production data we cannot afford to lose.
+          synchronize: true,
           logging: config.get<string>('DB_LOGGING') === 'true',
         };
 
