@@ -69,6 +69,18 @@ export class Trip {
   @Column({ type: 'timestamptz', nullable: true })
   scheduledAt?: Date | null;
 
+  // Stamped automatically when the trip transitions to IN_PROGRESS via the
+  // checkout action. Used by the UI to render a live elapsed-time counter
+  // and to derive total duration once the trip is completed.
+  @Column({ type: 'timestamptz', nullable: true })
+  startedAt?: Date | null;
+
+  // Stamped automatically when the trip transitions to COMPLETED via the
+  // check-in action. Persisted so downstream reporting (timesheets, fuel
+  // logs, etc.) can attribute totals to a specific trip window.
+  @Column({ type: 'timestamptz', nullable: true })
+  completedAt?: Date | null;
+
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 

@@ -1,6 +1,11 @@
-import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, QueryFailedError, Repository } from 'typeorm';
 
 import { VehicleStatus } from '../../common/enums';
 import {
@@ -38,18 +43,47 @@ export class VehicleService implements OnModuleInit {
   }
 
   async create(dto: CreateVehicleDto): Promise<Vehicle> {
+    const existingPlate = await this.repo.findOne({
+      where: { plateNumber: dto.plateNumber },
+      select: { id: true },
+    });
+    if (existingPlate) {
+      throw new ConflictException(
+        `Vehicle plate number ${dto.plateNumber} is already registered`,
+      );
+    }
+
     // Asset numbers are server-issued so the UI doesn't have to guess. We
     // assign sequentially (AST-001, AST-002, ...) based on the highest
     // existing AST-NNN suffix - good enough for our scale.
-    const assetNumber = await this.nextAssetNumber();
-    const vehicle = this.repo.create({
-      ...dto,
-      assetNumber,
-      status: VehicleStatus.ACTIVE,
-      mileage: dto.mileage ?? 0,
-      currentOdometer: dto.currentOdometer ?? 0,
-    });
-    return this.repo.save(vehicle);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const assetNumber = await this.nextAssetNumber();
+      const vehicle = this.repo.create({
+        ...dto,
+        assetNumber,
+        status: VehicleStatus.ACTIVE,
+        mileage: dto.mileage ?? 0,
+        currentOdometer: dto.currentOdometer ?? 0,
+      });
+
+      try {
+        return await this.repo.save(vehicle);
+      } catch (err) {
+        if (isUniqueViolation(err, 'assetNumber')) {
+          continue;
+        }
+        if (isUniqueViolation(err, 'plateNumber')) {
+          throw new ConflictException(
+            `Vehicle plate number ${dto.plateNumber} is already registered`,
+          );
+        }
+        throw err;
+      }
+    }
+
+    throw new ConflictException(
+      'Could not allocate a vehicle asset number. Please try again.',
+    );
   }
 
   async update(id: string, dto: UpdateVehicleDto): Promise<Vehicle> {
@@ -96,4 +130,18 @@ export class VehicleService implements OnModuleInit {
       await this.repo.save(vehicle);
     }
   }
+}
+
+function isUniqueViolation(err: unknown, column?: string): boolean {
+  if (!(err instanceof QueryFailedError)) return false;
+  const driverError = err.driverError as
+    | { code?: string; detail?: string; constraint?: string }
+    | undefined;
+  if (driverError?.code !== '23505') return false;
+  if (!column) return true;
+  return (
+    driverError.detail?.includes(`(${column})`) === true ||
+    driverError.detail?.includes(`"${column}"`) === true ||
+    driverError.constraint?.includes(column) === true
+  );
 }

@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Repository } from 'typeorm';
 
@@ -7,6 +11,16 @@ import { DriverService } from '../drivers/driver.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import { CreateTripDto, TripQueryDto, UpdateTripDto } from './trip.dto';
 import { Trip } from './trip.entity';
+
+// Whitelist of state transitions allowed through the checkout / check-in /
+// cancel actions. Anything else is rejected with 400 so the UI can never
+// move a trip into an inconsistent state by clicking the wrong button.
+const ALLOWED_TRANSITIONS: Record<TripStatus, TripStatus[]> = {
+  [TripStatus.PLANNED]: [TripStatus.IN_PROGRESS, TripStatus.CANCELLED],
+  [TripStatus.IN_PROGRESS]: [TripStatus.COMPLETED, TripStatus.CANCELLED],
+  [TripStatus.COMPLETED]: [],
+  [TripStatus.CANCELLED]: [],
+};
 
 @Injectable()
 export class TripService {
@@ -65,6 +79,7 @@ export class TripService {
       await this.drivers.findOne(dto.driverId);
     }
 
+    const previousStatus = trip.status;
     Object.assign(trip, {
       ...dto,
       scheduledAt:
@@ -74,6 +89,35 @@ export class TripService {
             ? new Date(dto.scheduledAt)
             : null,
     });
+
+    // Mirror the auto-stamping that setStatus does so updates that touch
+    // status from any path (form edit or status action) keep the trip
+    // timestamps in sync.
+    if (dto.status && dto.status !== previousStatus) {
+      stampStatusTimestamps(trip, dto.status);
+    }
+
+    await this.repo.save(trip);
+    return this.findOne(id);
+  }
+
+  // Dedicated status-transition endpoint used by the row action buttons
+  // (Trip Checkout / Trip Checkin / Cancel Trip). Centralises the
+  // start/complete timestamp side-effects so the UI doesn't have to manage
+  // them or risk drifting clocks across client devices.
+  async setStatus(id: string, next: TripStatus): Promise<Trip> {
+    const trip = await this.findOne(id);
+    if (trip.status === next) {
+      return trip;
+    }
+    const allowed = ALLOWED_TRANSITIONS[trip.status] ?? [];
+    if (!allowed.includes(next)) {
+      throw new BadRequestException(
+        `Cannot move trip from ${trip.status} to ${next}`,
+      );
+    }
+    trip.status = next;
+    stampStatusTimestamps(trip, next);
     await this.repo.save(trip);
     return this.findOne(id);
   }
@@ -83,5 +127,19 @@ export class TripService {
     if (!result.affected) {
       throw new NotFoundException(`Trip ${id} not found`);
     }
+  }
+}
+
+// Mutates the trip in place to record the start/complete timestamps that
+// correspond to a target status. We never overwrite an existing timestamp
+// so re-saving an already-progressed trip can't corrupt audit history.
+function stampStatusTimestamps(trip: Trip, next: TripStatus): void {
+  const now = new Date();
+  if (next === TripStatus.IN_PROGRESS && !trip.startedAt) {
+    trip.startedAt = now;
+  }
+  if (next === TripStatus.COMPLETED) {
+    if (!trip.startedAt) trip.startedAt = now;
+    if (!trip.completedAt) trip.completedAt = now;
   }
 }
