@@ -90,6 +90,14 @@ export class Trip {
   @Column({ type: 'float', nullable: true })
   distanceKm?: number | null;
 
+  // Whether the trip is a round trip (driver returns to the start
+  // location). When true, the client requests A→B→A from the routing
+  // API so the persisted `distanceKm` reflects both legs. Defaults to
+  // false to preserve the existing one-way behaviour for rows that
+  // predate this column.
+  @Column({ type: 'boolean', default: false })
+  isRoundTrip!: boolean;
+
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 

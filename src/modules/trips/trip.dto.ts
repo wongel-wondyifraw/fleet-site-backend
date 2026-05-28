@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsNumber,
@@ -71,6 +72,10 @@ export class CreateTripDto {
   scheduledAt?: string;
 
   @IsOptional()
+  @IsBoolean()
+  isRoundTrip?: boolean;
+
+  @IsOptional()
   @IsString()
   notes?: string;
 }
@@ -141,6 +146,10 @@ export class UpdateTripDto {
   @IsOptional()
   @IsNumber()
   distanceKm?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  isRoundTrip?: boolean;
 
   @IsOptional()
   @IsString()
