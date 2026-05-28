@@ -31,6 +31,31 @@ export enum AttendanceStatus {
   ON_LEAVE = 'ON_LEAVE',
 }
 
+// Roll-up state for a driver's expected workday on a given site/date. EXPECTED
+// is the lazy default before any punches; PRESENT/ON_BREAK/DONE are derived
+// from the punch stream; ABSENT only applies to past dates with no DAY_IN;
+// ON_LEAVE is a manual override that survives recalculation.
+export enum AttendanceDayStatus {
+  EXPECTED = 'EXPECTED',
+  PRESENT = 'PRESENT',
+  ON_BREAK = 'ON_BREAK',
+  DONE = 'DONE',
+  ABSENT = 'ABSENT',
+  ON_LEAVE = 'ON_LEAVE',
+}
+
+// Discrete clock events recorded against an AttendanceDay. DAY_IN/DAY_OUT
+// bracket the shift; LUNCH_* and MAINT_* are paired in/out events that open
+// and close breaks within the shift.
+export enum AttendancePunchType {
+  DAY_IN = 'DAY_IN',
+  DAY_OUT = 'DAY_OUT',
+  LUNCH_OUT = 'LUNCH_OUT',
+  LUNCH_IN = 'LUNCH_IN',
+  MAINT_OUT = 'MAINT_OUT',
+  MAINT_IN = 'MAINT_IN',
+}
+
 export enum SiteShift {
   DAY = 'DAY',
   NIGHT = 'NIGHT',

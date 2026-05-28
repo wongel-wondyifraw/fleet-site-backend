@@ -7,7 +7,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 // Shared utilities (CalculatedService, etc.).
 import { CommonModule } from './common/common.module';
-// Attendance feature module and entity.
+// Attendance feature module and entities (legacy Attendance row + new
+// event-log AttendanceDay/AttendancePunch pair).
+import { AttendanceDay } from './modules/attendance/attendance-day.entity';
+import { AttendancePunch } from './modules/attendance/attendance-punch.entity';
 import { Attendance } from './modules/attendance/attendance.entity';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 // Auth module (JWT login, guards, strategy).
@@ -57,6 +60,8 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
             Site,
             User,
             Attendance,
+            AttendanceDay,
+            AttendancePunch,
             FuelLog,
             Trip,
             AppSetting,
