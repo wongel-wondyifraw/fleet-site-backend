@@ -1,10 +1,11 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsWhere, Repository } from 'typeorm';
+import { FindOptionsWhere, Not, Repository } from 'typeorm';
 
 import { TripStatus } from '../../common/enums';
 import { DriverService } from '../drivers/driver.service';
@@ -58,6 +59,11 @@ export class TripService {
     await this.vehicles.findOne(dto.vehicleId);
     if (dto.driverId) {
       await this.drivers.findOne(dto.driverId);
+      // Business rule: a driver can only ever have one trip in
+      // IN_PROGRESS at a time. Block any new trip creation (in any
+      // status) while the chosen driver is on an active trip — the
+      // operator should close out the current trip first.
+      await this.assertDriverNotBusy(dto.driverId);
     }
 
     const trip = this.repo.create({
@@ -72,11 +78,26 @@ export class TripService {
   async update(id: string, dto: UpdateTripDto): Promise<Trip> {
     const trip = await this.findOne(id);
 
+    // Business rule: only PLANNED trips are editable. Once a trip has
+    // moved to IN_PROGRESS / COMPLETED / CANCELLED its record is
+    // historical and can only be transitioned through the dedicated
+    // /status endpoint.
+    if (trip.status !== TripStatus.PLANNED) {
+      throw new ConflictException(
+        `Only planned trips can be edited (current status: ${trip.status}).`,
+      );
+    }
+
     if (dto.vehicleId && dto.vehicleId !== trip.vehicleId) {
       await this.vehicles.findOne(dto.vehicleId);
     }
     if (dto.driverId) {
       await this.drivers.findOne(dto.driverId);
+      // If the driver is being changed, the new one must not already
+      // be on an in-progress trip elsewhere — same rationale as create.
+      if (dto.driverId !== trip.driverId) {
+        await this.assertDriverNotBusy(dto.driverId);
+      }
     }
 
     const previousStatus = trip.status;
@@ -127,6 +148,14 @@ export class TripService {
         `Cannot move trip from ${trip.status} to ${next}`,
       );
     }
+    // Same one-active-trip-per-driver rule kicks in when transitioning
+    // an existing PLANNED trip to IN_PROGRESS — covers the case where a
+    // PLANNED trip predates the active one and the operator tries to
+    // check it out while the driver is still on the road.
+    if (next === TripStatus.IN_PROGRESS && trip.driverId) {
+      await this.assertDriverNotBusy(trip.driverId, trip.id);
+    }
+
     trip.status = next;
     stampStatusTimestamps(trip, next);
     if (
@@ -146,9 +175,40 @@ export class TripService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.repo.delete(id);
-    if (!result.affected) {
+    // Business rule: in-progress trips cannot be deleted. They must be
+    // checked in or cancelled first so the row keeps a clean audit
+    // trail (started/completed timestamps survive instead of being
+    // wiped out by a mid-flight delete).
+    const trip = await this.repo.findOne({ where: { id } });
+    if (!trip) {
       throw new NotFoundException(`Trip ${id} not found`);
+    }
+    if (trip.status === TripStatus.IN_PROGRESS) {
+      throw new ConflictException(
+        'An in-progress trip cannot be deleted. Check it in or cancel it first.',
+      );
+    }
+    await this.repo.delete(id);
+  }
+
+  // Rejects with 409 if the driver currently has a different
+  // IN_PROGRESS trip on the books. `excludeTripId` lets the caller
+  // ignore the row it's actively transitioning so re-saving an already
+  // in-progress trip doesn't trip on itself.
+  private async assertDriverNotBusy(
+    driverId: string,
+    excludeTripId?: string,
+  ): Promise<void> {
+    const where: FindOptionsWhere<Trip> = {
+      driverId,
+      status: TripStatus.IN_PROGRESS,
+    };
+    if (excludeTripId) where.id = Not(excludeTripId);
+    const busy = await this.repo.findOne({ where });
+    if (busy) {
+      throw new ConflictException(
+        'This driver already has an in-progress trip. Check it in or cancel it before adding another.',
+      );
     }
   }
 }

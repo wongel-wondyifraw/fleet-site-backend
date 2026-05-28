@@ -23,6 +23,10 @@ import { FuelModule } from './modules/fuel/fuel.module';
 // Trip feature module and entity.
 import { Trip } from './modules/trips/trip.entity';
 import { TripModule } from './modules/trips/trip.module';
+// Trip target feature: global default + per-day overrides.
+import { AppSetting } from './modules/trip-targets/app-setting.entity';
+import { DailyTripTargetOverride } from './modules/trip-targets/trip-target.entity';
+import { TripTargetModule } from './modules/trip-targets/trip-target.module';
 // Site feature module and entity.
 import { Site } from './modules/sites/site.entity';
 import { SiteModule } from './modules/sites/site.module';
@@ -47,7 +51,17 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
         const databaseUrl = config.get<string>('DATABASE_URL');
         const sharedOptions = {
           // Explicit entity list; User added for the new auth/users feature.
-          entities: [Vehicle, Driver, Site, User, Attendance, FuelLog, Trip],
+          entities: [
+            Vehicle,
+            Driver,
+            Site,
+            User,
+            Attendance,
+            FuelLog,
+            Trip,
+            AppSetting,
+            DailyTripTargetOverride,
+          ],
           // Also pick up entities registered via forFeature() in child modules.
           autoLoadEntities: true,
           // TEMP: keep synchronize on everywhere so newly added entities
@@ -92,6 +106,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     AttendanceModule,
     FuelModule,
     TripModule,
+    TripTargetModule,
     HealthModule,
   ],
 })
