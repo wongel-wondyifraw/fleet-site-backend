@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, LessThanOrEqual, Repository } from 'typeorm';
 
 import { DriverStatus, LicenseClass } from '../../common/enums';
+import { SiteService } from '../sites/site.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   AssignVehicleDto,
@@ -24,6 +25,7 @@ export class DriverService implements OnModuleInit {
     @InjectRepository(Driver)
     private readonly repo: Repository<Driver>,
     private readonly vehicles: VehicleService,
+    private readonly sites: SiteService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -104,6 +106,7 @@ export class DriverService implements OnModuleInit {
       hireDate: new Date(dto.hireDate),
       status: DriverStatus.ACTIVE,
       assignedVehicleId: dto.assignedVehicleId ?? null,
+      homeSite: await this.homeSiteFromVehicleId(dto.assignedVehicleId ?? null),
     });
     return this.repo.save(driver);
   }
@@ -119,12 +122,18 @@ export class DriverService implements OnModuleInit {
       await this.vehicles.findOne(dto.assignedVehicleId);
     }
 
+    const { homeSite: _ignoredHomeSite, ...rest } = dto;
     Object.assign(driver, {
-      ...dto,
+      ...rest,
       licenseExpiry: dto.licenseExpiry
         ? new Date(dto.licenseExpiry)
         : driver.licenseExpiry,
     });
+    if (dto.assignedVehicleId !== undefined) {
+      driver.homeSite = await this.homeSiteFromVehicleId(
+        dto.assignedVehicleId,
+      );
+    }
     return this.repo.save(driver);
   }
 
@@ -160,6 +169,17 @@ export class DriverService implements OnModuleInit {
     if (!result.affected) {
       throw new NotFoundException(`Driver ${id} not found`);
     }
+  }
+
+  /** Driver site is derived from the assigned vehicle's site (by name). */
+  private async homeSiteFromVehicleId(
+    vehicleId: string | null,
+  ): Promise<string | null> {
+    if (!vehicleId) return null;
+    const vehicle = await this.vehicles.findOne(vehicleId);
+    if (!vehicle.assignedSite) return null;
+    const site = await this.sites.findOne(vehicle.assignedSite);
+    return site.name;
   }
 
   private async ensureUnique(
