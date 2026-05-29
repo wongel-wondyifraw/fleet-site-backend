@@ -30,6 +30,10 @@ import { TripModule } from './modules/trips/trip.module';
 import { AppSetting } from './modules/trip-targets/app-setting.entity';
 import { DailyTripTargetOverride } from './modules/trip-targets/trip-target.entity';
 import { TripTargetModule } from './modules/trip-targets/trip-target.module';
+// Custom trip routes feature: admin-defined start/end presets surfaced
+// on the trip-creation form as "Custom" pickers.
+import { CustomTripRoute } from './modules/custom-trip-routes/custom-trip-route.entity';
+import { CustomTripRouteModule } from './modules/custom-trip-routes/custom-trip-route.module';
 // Site feature module and entity.
 import { Site } from './modules/sites/site.entity';
 import { SiteModule } from './modules/sites/site.module';
@@ -66,6 +70,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
             Trip,
             AppSetting,
             DailyTripTargetOverride,
+            CustomTripRoute,
           ],
           // Also pick up entities registered via forFeature() in child modules.
           autoLoadEntities: true,
@@ -112,6 +117,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     FuelModule,
     TripModule,
     TripTargetModule,
+    CustomTripRouteModule,
     HealthModule,
   ],
 })
