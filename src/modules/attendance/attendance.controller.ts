@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 
 import {
+  AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
   AttendanceRosterQueryDto,
   CheckInDto,
@@ -38,6 +39,17 @@ export class AttendanceController {
   @Get('roster')
   getRoster(@Query() query: AttendanceRosterQueryDto) {
     return this.attendance.getRoster(query);
+  }
+
+  // Per-driver attendance history for the detail page. Declared before the
+  // legacy `:id` routes so Nest doesn't try to ParseUUIDPipe the literal
+  // "drivers" segment.
+  @Get('drivers/:driverId/history')
+  getDriverHistory(
+    @Param('driverId', ParseUUIDPipe) driverId: string,
+    @Query() query: AttendanceDriverHistoryQueryDto,
+  ) {
+    return this.attendance.getDriverHistory(driverId, query);
   }
 
   @Post('days/:dayId/punches')

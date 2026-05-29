@@ -4,7 +4,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, FindOptionsWhere, ILike, In, Repository } from 'typeorm';
+import {
+  Between,
+  FindOptionsWhere,
+  ILike,
+  In,
+  IsNull,
+  Repository,
+} from 'typeorm';
 
 import { CalculatedService } from '../../common/calculated.service';
 import {
@@ -17,6 +24,7 @@ import {
 import { Driver } from '../drivers/driver.entity';
 import { Site } from '../sites/site.entity';
 import {
+  AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
   AttendanceRosterQueryDto,
   CheckInDto,
@@ -29,6 +37,7 @@ import {
 import { AttendanceDay } from './attendance-day.entity';
 import { AttendancePunch } from './attendance-punch.entity';
 import { Attendance } from './attendance.entity';
+import { OdometerReading } from './odometer-reading.entity';
 
 // Only these statuses are user-settable on a day. Everything else is derived
 // from the punch stream and would be clobbered on the next recalculation.
@@ -36,6 +45,14 @@ const USER_SETTABLE_DAY_STATUSES = new Set<AttendanceDayStatus>([
   AttendanceDayStatus.EXPECTED,
   AttendanceDayStatus.ON_LEAVE,
 ]);
+
+// Auto-close reason codes persisted on AttendanceDay.autoCloseReason. The
+// frontend reads these codes to render a per-reason warning badge so the
+// timekeeper knows which event was synthesised by the system vs. recorded
+// by a human.
+const AUTO_CLOSE_MISSING_DAY_OUT = 'MISSING_DAY_OUT';
+const AUTO_CLOSE_MISSING_LUNCH_RETURN = 'MISSING_LUNCH_RETURN';
+const AUTO_CLOSE_MISSING_MAINT_RETURN = 'MISSING_MAINT_RETURN';
 
 @Injectable()
 export class AttendanceService {
@@ -46,6 +63,8 @@ export class AttendanceService {
     private readonly days: Repository<AttendanceDay>,
     @InjectRepository(AttendancePunch)
     private readonly punches: Repository<AttendancePunch>,
+    @InjectRepository(OdometerReading)
+    private readonly odometerReadings: Repository<OdometerReading>,
     @InjectRepository(Driver)
     private readonly drivers: Repository<Driver>,
     @InjectRepository(Site)
@@ -212,6 +231,48 @@ export class AttendanceService {
     return rows;
   }
 
+  // Returns every AttendanceDay row for `driverId` between `from` and `to`
+  // (inclusive), ordered chronologically with punches eager-loaded. Used by
+  // the per-driver detail page to render a date-range timeline, working-
+  // hours chart, and the absent / late / missed-punch tallies.
+  //
+  // We deliberately don't materialise rows for missing dates here — those
+  // are still created lazily by the roster endpoint on first view. This
+  // keeps the read cheap and avoids inserting a week's worth of EXPECTED
+  // rows the first time someone scrolls back through history.
+  //
+  // recalcAndPersistDays runs on the result so any stale past-dated rows
+  // get auto-closed (DAY_OUT / LUNCH_IN synthesised at end-of-day) and
+  // their status / workDistanceKm are refreshed in the same response.
+  async getDriverHistory(
+    driverId: string,
+    query: AttendanceDriverHistoryQueryDto,
+  ): Promise<{ driver: Driver | null; days: AttendanceDay[] }> {
+    const driver = await this.drivers.findOne({
+      where: { id: driverId },
+      relations: { assignedVehicle: true },
+    });
+    if (!driver) {
+      throw new NotFoundException(`Driver ${driverId} not found`);
+    }
+
+    // We sort punches inside each day on the query so the frontend can
+    // walk them in chronological order without re-sorting.
+    let days = await this.days
+      .createQueryBuilder('day')
+      .leftJoinAndSelect('day.punches', 'punch')
+      .leftJoinAndSelect('day.site', 'site')
+      .where('day.driverId = :driverId', { driverId })
+      .andWhere('day.date >= :from', { from: query.from })
+      .andWhere('day.date <= :to', { to: query.to })
+      .orderBy('day.date', 'ASC')
+      .addOrderBy('punch.at', 'ASC')
+      .getMany();
+
+    days = await this.recalcAndPersistDays(days);
+    return { driver, days };
+  }
+
   async createPunch(
     dayId: string,
     dto: CreateAttendancePunchDto,
@@ -230,6 +291,27 @@ export class AttendanceService {
     });
     await this.punches.save(punch);
 
+    // Persist the odometer reading (if any) in the same logical operation
+    // as the punch. We don't wrap them in an explicit DB transaction here
+    // because the unique index on (punchId) is the real safety net — even
+    // if the reading insert fails we still have a valid punch, and the
+    // distance recompute below simply skips the missing reading.
+    if (dto.odometer !== undefined && dto.odometer !== null) {
+      const driverIdForReading = day.driverId;
+      const vehicleIdForReading = day.driver?.assignedVehicleId ?? null;
+      const reading = this.odometerReadings.create({
+        punchId: punch.id,
+        dayId: day.id,
+        driverId: driverIdForReading,
+        vehicleId: vehicleIdForReading,
+        punchType: dto.type,
+        value: dto.odometer.toFixed(2),
+        capturedAt: punchAt,
+      });
+      await this.odometerReadings.save(reading);
+    }
+
+    await this.recomputeWorkDistance(day.id);
     return this.recalcSingleDay(day.id);
   }
 
@@ -271,12 +353,19 @@ export class AttendanceService {
     }
     if (dto.at !== undefined) {
       punch.at = new Date(dto.at);
+      // Keep the linked odometer reading's capturedAt in lockstep with the
+      // punch time so timestamps stay consistent across the two tables.
+      await this.odometerReadings.update(
+        { punchId: punch.id },
+        { capturedAt: punch.at },
+      );
     }
     if (dto.note !== undefined) {
       punch.note = dto.note;
     }
     await this.punches.save(punch);
 
+    await this.recomputeWorkDistance(punch.dayId);
     return this.recalcSingleDay(punch.dayId);
   }
 
@@ -297,6 +386,13 @@ export class AttendanceService {
     punch.note = punch.note ? `${punch.note} | ${auditLine}` : auditLine;
     await this.punches.save(punch);
 
+    // A voided punch's odometer reading is also removed from the distance
+    // calculation. We delete the reading row outright (rather than soft-
+    // flagging it) because nothing else points at it — the fuel module
+    // only consumes readings tied to live punches.
+    await this.odometerReadings.delete({ punchId: punch.id });
+
+    await this.recomputeWorkDistance(punch.dayId);
     return this.recalcSingleDay(punch.dayId);
   }
 
@@ -347,10 +443,12 @@ export class AttendanceService {
 
   // Load a day with its punches for a write path. Punches are loaded ordered
   // by `at` ASC so the validation/derivation helpers can scan them in order.
+  // The `driver` relation is included so we can resolve the driver's current
+  // vehicle when persisting odometer readings against the new punch.
   private async loadDayForWrite(dayId: string): Promise<AttendanceDay> {
     const day = await this.days.findOne({
       where: { id: dayId },
-      relations: { punches: true },
+      relations: { punches: true, driver: true },
     });
     if (!day) {
       throw new NotFoundException(`Attendance day ${dayId} not found`);
@@ -358,6 +456,217 @@ export class AttendanceService {
     day.punches = (day.punches ?? []).sort(
       (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
     );
+    return day;
+  }
+
+  // Recompute and persist the AttendanceDay.workDistanceKm cache from the
+  // odometer readings on this day's *live* (non-voided) punches.
+  //
+  // Default formula (per the product spec, when the driver took a lunch
+  // break and the reading was captured on both lunch punches):
+  //   total = (LUNCH_OUT - DAY_IN) + (DAY_OUT - LUNCH_IN)
+  //
+  // Fallback (no lunch readings at all): if the driver skipped the lunch
+  // punches entirely we can't split the day into two legs, so we fall
+  // back to the simpler whole-shift distance:
+  //   total = DAY_OUT - DAY_IN
+  //
+  // We use the latest reading per punch type (matching how the UI picks
+  // the latest non-voided punch). A leg with a missing endpoint
+  // contributes zero. Negative legs (odometer went down — usually a
+  // typo) also contribute zero so a single bad reading can't make the
+  // total look like a refund.
+  private async recomputeWorkDistance(dayId: string): Promise<void> {
+    const day = await this.days.findOne({ where: { id: dayId } });
+    if (!day) return;
+
+    // Pull only readings whose underlying punch is still live. A voided
+    // punch's reading is normally deleted by voidPunch, but we double
+    // check here in case the row predates that behaviour or was inserted
+    // by hand.
+    const livePunchIds = (
+      await this.punches.find({
+        where: { dayId, isVoided: false },
+        select: { id: true, type: true },
+      })
+    ).map((p) => p.id);
+
+    if (livePunchIds.length === 0) {
+      if (day.workDistanceKm !== null && day.workDistanceKm !== undefined) {
+        await this.days.update({ id: dayId }, { workDistanceKm: null });
+      }
+      return;
+    }
+
+    const readings = await this.odometerReadings.find({
+      where: { dayId, punchId: In(livePunchIds) },
+      order: { capturedAt: 'ASC' },
+    });
+
+    const latestByType = new Map<AttendancePunchType, number>();
+    for (const r of readings) {
+      // numeric columns come back as strings from pg; parseFloat is fine
+      // because we already validated decimals at the DTO layer.
+      const num = parseFloat(r.value);
+      if (Number.isFinite(num)) {
+        latestByType.set(r.punchType, num);
+      }
+    }
+
+    const dayInVal = latestByType.get(AttendancePunchType.DAY_IN);
+    const dayOutVal = latestByType.get(AttendancePunchType.DAY_OUT);
+    const lunchOutVal = latestByType.get(AttendancePunchType.LUNCH_OUT);
+    const lunchInVal = latestByType.get(AttendancePunchType.LUNCH_IN);
+
+    // Edge case: driver never punched lunch (so neither LUNCH_OUT nor
+    // LUNCH_IN have readings). We use the whole-shift distance instead of
+    // returning zero, otherwise a clean DAY_IN+DAY_OUT day with valid
+    // readings would silently show 0 km.
+    const noLunchReadings =
+      lunchOutVal === undefined && lunchInVal === undefined;
+
+    let total = 0;
+    if (noLunchReadings) {
+      total = legDistance(dayInVal, dayOutVal);
+    } else {
+      const morning = legDistance(dayInVal, lunchOutVal);
+      const afternoon = legDistance(lunchInVal, dayOutVal);
+      total = morning + afternoon;
+    }
+
+    // null when we have no contributing readings at all, so the UI can
+    // distinguish "no data yet" from "zero kilometres driven".
+    const next = readings.length === 0 ? null : total.toFixed(2);
+
+    if (day.workDistanceKm !== next) {
+      await this.days.update({ id: dayId }, { workDistanceKm: next });
+    }
+  }
+
+  // Auto-close a stale AttendanceDay by synthesising end-of-day punches
+  // when the driver left it open. Runs lazily on every roster read (via
+  // recalcAndPersistDays) so a day that ends without a DAY_OUT — or a
+  // lunch / maintenance break that was never closed — gets cleaned up
+  // the next time anyone looks at it.
+  //
+  // Three scenarios are handled:
+  //   1. DAY_IN exists, no DAY_OUT      → synthesise DAY_OUT @ 23:59:59
+  //   2. LUNCH_OUT open (no LUNCH_IN)   → synthesise LUNCH_IN @ 23:59:59
+  //                                       (and DAY_OUT too if also missing —
+  //                                       a driver who never returned from
+  //                                       lunch obviously never punched out)
+  //   3. MAINT_OUT open (no MAINT_IN)   → synthesise MAINT_IN @ 23:59:59
+  //
+  // Synthesised punches carry an audit note and bypass assertPunchAllowed
+  // because we control the conditions. They do NOT carry an odometer
+  // reading — the system has no way to know what the dashboard said at
+  // the time, so the afternoon leg's distance gracefully degrades to 0.
+  //
+  // The autoClosedAt + autoCloseReason columns are flipped in a single
+  // UPDATE ... WHERE autoClosedAt IS NULL so concurrent roster reads
+  // won't both insert the same synthesised punches.
+  private async autoCloseIfStale(day: AttendanceDay): Promise<AttendanceDay> {
+    // Today / future days are never auto-closed — the driver might still
+    // punch out before midnight. We compare the date strings directly
+    // (both are YYYY-MM-DD in server local time).
+    if (day.date >= todayDateKey()) return day;
+    if (day.autoClosedAt) return day;
+
+    const live = (day.punches ?? []).filter((p) => !p.isVoided);
+    const hasDayIn = live.some((p) => p.type === AttendancePunchType.DAY_IN);
+    const hasDayOut = live.some((p) => p.type === AttendancePunchType.DAY_OUT);
+    const lunchOpen =
+      countOpen(
+        live,
+        AttendancePunchType.LUNCH_OUT,
+        AttendancePunchType.LUNCH_IN,
+      ) > 0;
+    const maintOpen =
+      countOpen(
+        live,
+        AttendancePunchType.MAINT_OUT,
+        AttendancePunchType.MAINT_IN,
+      ) > 0;
+
+    // No DAY_IN means there's nothing to close — deriveDayStatus will
+    // mark this as ABSENT instead, which is the correct signal.
+    if (!hasDayIn) return day;
+
+    // Already a normal-looking day: closed DAY_OUT, no open breaks. Skip.
+    if (hasDayOut && !lunchOpen && !maintOpen) return day;
+
+    const reasons: string[] = [];
+    const synthesised: AttendancePunch[] = [];
+    // 23:59:59.999 in server local time of the day's date. Mirrors what a
+    // midnight cron job would have produced.
+    const endOfDay = new Date(`${day.date}T23:59:59.999`);
+
+    if (lunchOpen) {
+      synthesised.push(
+        this.punches.create({
+          dayId: day.id,
+          type: AttendancePunchType.LUNCH_IN,
+          at: endOfDay,
+          note: 'auto-closed: driver did not return from lunch',
+          isVoided: false,
+        }),
+      );
+      reasons.push(AUTO_CLOSE_MISSING_LUNCH_RETURN);
+    }
+    if (maintOpen) {
+      synthesised.push(
+        this.punches.create({
+          dayId: day.id,
+          type: AttendancePunchType.MAINT_IN,
+          at: endOfDay,
+          note: 'auto-closed: driver did not return from maintenance',
+          isVoided: false,
+        }),
+      );
+      reasons.push(AUTO_CLOSE_MISSING_MAINT_RETURN);
+    }
+    if (!hasDayOut) {
+      synthesised.push(
+        this.punches.create({
+          dayId: day.id,
+          type: AttendancePunchType.DAY_OUT,
+          at: endOfDay,
+          note: 'auto-closed: driver did not punch out',
+          isVoided: false,
+        }),
+      );
+      reasons.push(AUTO_CLOSE_MISSING_DAY_OUT);
+    }
+
+    if (synthesised.length === 0) return day;
+
+    const closedAt = new Date();
+    const reasonString = reasons.join(',');
+
+    // Atomic-ish marker: only the first concurrent request that flips
+    // autoClosedAt from NULL to a value gets to insert the synthesised
+    // punches. The losers see affected === 0 and bail out gracefully.
+    const claim = await this.days.update(
+      { id: day.id, autoClosedAt: IsNull() },
+      { autoClosedAt: closedAt, autoCloseReason: reasonString },
+    );
+    if (!claim.affected) return day;
+
+    await this.punches.save(synthesised);
+
+    // Reflect the new state on the in-memory entity so the caller (and
+    // deriveDayStatus / the roster response) sees the synthesised punches
+    // without an extra DB round-trip.
+    day.autoClosedAt = closedAt;
+    day.autoCloseReason = reasonString;
+    day.punches = [...(day.punches ?? []), ...synthesised].sort(
+      (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
+    );
+
+    // Synthesised punches don't have odometer readings, but recomputing
+    // the cache still matters when the missing-lunch fallback kicks in
+    // (see recomputeWorkDistance), so re-run it here.
+    await this.recomputeWorkDistance(day.id);
     return day;
   }
 
@@ -382,10 +691,24 @@ export class AttendanceService {
   // Walk a batch of days and update their persisted status to match the
   // derivation rules. ON_LEAVE is sticky — we never overwrite it from punches
   // because it's a manual scheduling decision.
+  //
+  // Past-dated days are first run through autoCloseIfStale so any open
+  // breaks / missing DAY_OUT get synthesised end-of-day punches before
+  // the status is derived. This makes the "missing data" cases visible
+  // in the roster as DONE + an autoClosedAt flag rather than a stuck
+  // PRESENT/ON_BREAK row that never resolves.
   private async recalcAndPersistDays(
     rows: AttendanceDay[],
   ): Promise<AttendanceDay[]> {
     const today = todayDateKey();
+    for (const day of rows) {
+      if (day.date < today && !day.autoClosedAt) {
+        // autoCloseIfStale mutates day.punches / day.autoClosedAt in-place
+        // so the subsequent deriveDayStatus call sees the updated state.
+        await this.autoCloseIfStale(day);
+      }
+    }
+
     const dirty: AttendanceDay[] = [];
     for (const day of rows) {
       const next = deriveDayStatus(day, today);
@@ -426,13 +749,10 @@ export class AttendanceService {
         if (hasDayIn) {
           throw new BadRequestException('Day already has a DAY_IN punch.');
         }
-        // DAY_IN must be the first non-voided event; otherwise the timeline
-        // would have a break/out before clock-in which is nonsensical.
-        if (live.length > 0) {
-          throw new BadRequestException(
-            'DAY_IN must be the first punch of the day.',
-          );
-        }
+        // A replacement DAY_IN is valid after the original DAY_IN was voided.
+        // Other later punches may still exist on the audit timeline, so the
+        // invariant we actually need is "only one live DAY_IN", not "DAY_IN
+        // is physically the first remaining live punch".
         return;
       case AttendancePunchType.DAY_OUT:
         if (!hasDayIn) {
@@ -495,6 +815,17 @@ export class AttendanceService {
         throw new BadRequestException(`Unknown punch type: ${type}`);
     }
   }
+}
+
+// Distance for a single leg of the work-distance calculation. Returns 0
+// when either reading is missing, when they're equal (driver didn't
+// move), or when the result would be negative (almost always a typo —
+// odometers only count up).
+function legDistance(from: number | undefined, to: number | undefined): number {
+  if (from === undefined || to === undefined) return 0;
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  const delta = to - from;
+  return delta > 0 ? delta : 0;
 }
 
 // Returns net opens for a paired (out, in) sequence. Positive means there is

@@ -64,6 +64,35 @@ export class AttendanceDay {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 
+  // Cached "work distance" for the shift, in kilometres. Derived from the
+  // odometer readings attached to punches as:
+  //   (LUNCH_OUT - DAY_IN) + (DAY_OUT - LUNCH_IN)
+  // i.e. the morning leg + the afternoon leg, excluding the lunch window.
+  // Recomputed on every punch create/update/void so the fuel module can
+  // join on this value without re-running the math itself. Null until we
+  // have enough readings to compute it (at minimum DAY_IN + LUNCH_OUT for
+  // the morning leg).
+  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+  workDistanceKm?: string | null;
+
+  // When the system auto-closed this day because the driver forgot to
+  // punch out (or forgot to return from lunch/maintenance). Null on days
+  // that were closed normally. Set lazily on the next read after midnight
+  // — see AttendanceService.autoCloseIfStale for the synthesis logic.
+  @Column({ type: 'timestamptz', nullable: true })
+  autoClosedAt?: Date | null;
+
+  // Comma-separated list of which conditions triggered the auto-close on
+  // this day. Values come from a fixed vocabulary so the UI can render a
+  // human-friendly badge per reason:
+  //   MISSING_DAY_OUT       — driver forgot to punch out for the day
+  //   MISSING_LUNCH_RETURN  — driver started lunch but never punched back in
+  //   MISSING_MAINT_RETURN  — driver started a maintenance break and never returned
+  // Multiple reasons can co-occur (e.g. "MISSING_LUNCH_RETURN,MISSING_DAY_OUT"
+  // when the driver left at lunch and never came back).
+  @Column({ type: 'varchar', length: 128, nullable: true })
+  autoCloseReason?: string | null;
+
   @OneToMany(() => AttendancePunch, (punch) => punch.day)
   punches!: AttendancePunch[];
 

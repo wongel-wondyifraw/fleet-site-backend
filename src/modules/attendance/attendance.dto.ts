@@ -1,9 +1,12 @@
+import { Type } from 'class-transformer';
 import {
   IsDateString,
   IsEnum,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Min,
 } from 'class-validator';
 
 import {
@@ -117,6 +120,18 @@ export class AttendanceRosterQueryDto {
   search?: string;
 }
 
+// Query for GET /attendance/drivers/:driverId/history. Both bounds are
+// inclusive YYYY-MM-DD calendar days. The frontend defaults to a 30-day
+// window ending today; longer ranges are allowed but the caller is
+// expected to keep them reasonable.
+export class AttendanceDriverHistoryQueryDto {
+  @IsDateString()
+  from!: string;
+
+  @IsDateString()
+  to!: string;
+}
+
 export class CreateAttendancePunchDto {
   @IsEnum(AttendancePunchType)
   type!: AttendancePunchType;
@@ -134,6 +149,17 @@ export class CreateAttendancePunchDto {
   @IsOptional()
   @IsUUID()
   actorUserId?: string;
+
+  // Optional odometer reading captured at this punch, in kilometres.
+  // Currently the UI prompts for it on DAY_IN / DAY_OUT / LUNCH_OUT /
+  // LUNCH_IN. The service tolerates the field on any punch type — it
+  // stores whatever the timekeeper provides and lets the read side decide
+  // which readings to feed into the distance calculation.
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  odometer?: number;
 }
 
 // Only EXPECTED and ON_LEAVE are user-settable from the day endpoint. All

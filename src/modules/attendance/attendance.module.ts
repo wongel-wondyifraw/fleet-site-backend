@@ -8,17 +8,21 @@ import { AttendanceDay } from './attendance-day.entity';
 import { AttendancePunch } from './attendance-punch.entity';
 import { Attendance } from './attendance.entity';
 import { AttendanceService } from './attendance.service';
+import { OdometerReading } from './odometer-reading.entity';
 
 @Module({
   // Driver and Site repos are read by the roster endpoint to resolve the
   // expected drivers for a site and to look up the site name. We register
   // them via forFeature() so the AttendanceService can inject them directly
   // without depending on the SiteModule / DriverModule providers.
+  // OdometerReading is registered alongside AttendancePunch so the service
+  // can persist a reading transactionally with its parent punch.
   imports: [
     TypeOrmModule.forFeature([
       Attendance,
       AttendanceDay,
       AttendancePunch,
+      OdometerReading,
       Driver,
       Site,
     ]),
