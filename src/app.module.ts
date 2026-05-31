@@ -14,6 +14,8 @@ import { AttendanceDay } from './modules/attendance/attendance-day.entity';
 import { AttendancePunch } from './modules/attendance/attendance-punch.entity';
 import { Attendance } from './modules/attendance/attendance.entity';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { AttendanceRulesModule } from './modules/attendance-rules/attendance-rules.module';
+import { TimeSettingsModule } from './modules/time-settings/time-settings.module';
 import { OdometerReading } from './modules/attendance/odometer-reading.entity';
 // Auth module (JWT login, guards, strategy).
 import { AuthModule } from './modules/auth/auth.module';
@@ -117,6 +119,8 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     VehicleModule,
     DriverModule,
     AttendanceModule,
+    AttendanceRulesModule,
+    TimeSettingsModule,
     FuelModule,
     TripModule,
     TripTargetModule,
