@@ -14,6 +14,7 @@ import { Vehicle } from '../vehicles/vehicle.entity';
 
 @Entity({ name: 'drivers' })
 @Index(['lastName', 'firstName'])
+@Index(['status', 'homeSite'])
 export class Driver {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

@@ -57,3 +57,13 @@ export function buildNextCursor<T extends { createdAt: Date; id: string }>(
   const last = rows[limit - 1];
   return encodeCursor(last.createdAt, last.id);
 }
+
+/** Cursor helper when the sort key is not `createdAt` (e.g. fuel log fillDate). */
+export function buildNextCursorByDateField(
+  rows: { sortAt: Date; id: string }[],
+  limit: number,
+): string | null {
+  if (rows.length <= limit) return null;
+  const last = rows[limit - 1];
+  return encodeCursor(last.sortAt, last.id);
+}

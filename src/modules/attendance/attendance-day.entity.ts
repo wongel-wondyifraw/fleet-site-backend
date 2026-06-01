@@ -23,6 +23,8 @@ import { AttendancePunch } from './attendance-punch.entity';
 @Index('uq_attendance_day_driver_site_date', ['driverId', 'siteId', 'date'], {
   unique: true,
 })
+@Index(['siteId', 'date'])
+@Index(['driverId', 'date'])
 export class AttendanceDay {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

@@ -13,6 +13,7 @@ import { Vehicle } from '../vehicles/vehicle.entity';
 
 @Entity({ name: 'fuel_logs' })
 @Index(['vehicleId', 'fillDate'])
+@Index(['fillDate', 'id'])
 export class FuelLog {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

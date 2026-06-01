@@ -82,6 +82,18 @@ export class UpdateFuelLogDto {
   notes?: string | null;
 }
 
+export class FuelEfficiencyQueryDto {
+  /** Inclusive lower bound. Defaults to 90 days before `to` (or today). */
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  /** Inclusive upper bound. Defaults to today. */
+  @IsOptional()
+  @IsDateString()
+  to?: string;
+}
+
 export class FuelLogQueryDto extends PaginationDto {
   @IsOptional()
   @IsUUID()

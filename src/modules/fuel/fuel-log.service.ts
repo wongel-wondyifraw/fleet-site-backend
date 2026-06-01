@@ -4,10 +4,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import {
-  buildNextCursor,
+  buildNextCursorByDateField,
   PageResponse,
   parseCursor,
   resolveLimit,
@@ -16,10 +16,13 @@ import { CalculatedService } from '../../common/calculated.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   CreateFuelLogDto,
+  FuelEfficiencyQueryDto,
   FuelLogQueryDto,
   UpdateFuelLogDto,
 } from './fuel-log.dto';
 import { FuelLog } from './fuel-log.entity';
+
+const EFFICIENCY_DEFAULT_WINDOW_DAYS = 90;
 
 @Injectable()
 export class FuelLogService {
@@ -55,7 +58,7 @@ export class FuelLogService {
     }
     if (cursor) {
       qb.andWhere(
-        '(log.createdAt < :cursorAt OR (log.createdAt = :cursorAt AND log.id < :cursorId))',
+        '(log.fillDate < :cursorAt OR (log.fillDate = :cursorAt AND log.id < :cursorId))',
         { cursorAt: cursor.createdAt, cursorId: cursor.id },
       );
     }
@@ -66,7 +69,10 @@ export class FuelLogService {
     const rows = await qb.getMany();
     return {
       data: rows.slice(0, limit),
-      nextCursor: buildNextCursor(rows, limit),
+      nextCursor: buildNextCursorByDateField(
+        rows.map((row) => ({ sortAt: row.fillDate, id: row.id })),
+        limit,
+      ),
     };
   }
 
@@ -113,21 +119,34 @@ export class FuelLogService {
     }
   }
 
-  async efficiencyForVehicle(vehicleId: string): Promise<{
+  async efficiencyForVehicle(
+    vehicleId: string,
+    query: FuelEfficiencyQueryDto = {},
+  ): Promise<{
     vehicleId: string;
+    from: string;
+    to: string;
     samples: number;
     latestKmPerLitre: number | null;
     averageKmPerLitre: number | null;
     costPerKm: number | null;
   }> {
-    const logs = await this.repo.find({
-      where: { vehicleId },
-      order: { fillDate: 'ASC' },
-    });
+    const { from, to } = resolveEfficiencyWindow(query);
+    const logs = await this.repo
+      .createQueryBuilder('log')
+      .where('log.vehicleId = :vehicleId', { vehicleId })
+      .andWhere('log.fillDate >= :from', { from: new Date(`${from}T00:00:00`) })
+      .andWhere('log.fillDate <= :to', { to: new Date(`${to}T23:59:59.999`) })
+      .orderBy('log.fillDate', 'ASC')
+      .getMany();
+    const windowed = logs;
 
     const efficiencies: number[] = [];
-    for (let i = 1; i < logs.length; i++) {
-      const eff = this.calculated.computeFuelEfficiency(logs[i - 1], logs[i]);
+    for (let i = 1; i < windowed.length; i++) {
+      const eff = this.calculated.computeFuelEfficiency(
+        windowed[i - 1],
+        windowed[i],
+      );
       if (eff !== null) efficiencies.push(eff);
     }
 
@@ -141,12 +160,35 @@ export class FuelLogService {
 
     return {
       vehicleId,
-      samples: logs.length,
+      from,
+      to,
+      samples: windowed.length,
       latestKmPerLitre: efficiencies.length
         ? efficiencies[efficiencies.length - 1]
         : null,
       averageKmPerLitre: average,
-      costPerKm: this.calculated.computeCostPerKm(logs),
+      costPerKm: this.calculated.computeCostPerKm(windowed),
     };
   }
+}
+
+function resolveEfficiencyWindow(query: FuelEfficiencyQueryDto): {
+  from: string;
+  to: string;
+} {
+  const to = query.to ?? toDateKey(new Date());
+  if (query.from) {
+    return { from: query.from, to };
+  }
+  const end = new Date(`${to}T00:00:00`);
+  const start = new Date(end);
+  start.setDate(start.getDate() - (EFFICIENCY_DEFAULT_WINDOW_DAYS - 1));
+  return { from: toDateKey(start), to };
+}
+
+function toDateKey(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }

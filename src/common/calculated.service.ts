@@ -8,6 +8,21 @@ const MS_PER_HOUR = 1000 * 60 * 60;
 @Injectable()
 export class CalculatedService {
   /**
+   * Estimated fuel consumption in litres for a shift, derived from
+   * odometer distance and the vehicle's rated km/L.
+   */
+  computeEstimatedLiters(
+    distanceKm: number,
+    ratedKmPerLitre: number,
+  ): number | null {
+    if (!Number.isFinite(distanceKm) || distanceKm <= 0) return null;
+    if (!Number.isFinite(ratedKmPerLitre) || ratedKmPerLitre <= 0) {
+      return null;
+    }
+    return Number((distanceKm / ratedKmPerLitre).toFixed(2));
+  }
+
+  /**
    * Fuel efficiency in km per litre based on the change in odometer
    * between two fuel logs for the same vehicle.
    */

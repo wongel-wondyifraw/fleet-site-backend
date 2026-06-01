@@ -14,6 +14,7 @@ import {
 
 import {
   CreateFuelLogDto,
+  FuelEfficiencyQueryDto,
   FuelLogQueryDto,
   UpdateFuelLogDto,
 } from './fuel-log.dto';
@@ -29,8 +30,11 @@ export class FuelLogController {
   }
 
   @Get('efficiency/vehicle/:vehicleId')
-  efficiency(@Param('vehicleId', ParseUUIDPipe) vehicleId: string) {
-    return this.fuel.efficiencyForVehicle(vehicleId);
+  efficiency(
+    @Param('vehicleId', ParseUUIDPipe) vehicleId: string,
+    @Query() query: FuelEfficiencyQueryDto,
+  ) {
+    return this.fuel.efficiencyForVehicle(vehicleId, query);
   }
 
   @Get(':id')

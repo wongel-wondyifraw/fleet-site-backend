@@ -180,9 +180,6 @@ export class AttendanceService {
       throw new NotFoundException(`Site ${query.siteId} not found`);
     }
 
-    // We match drivers to a site by name because `Driver.homeSite` is a free
-    // text field (no FK). Keep this in sync with how drivers are assigned in
-    // the UI; if we ever migrate homeSite to a UUID we'd swap this lookup.
     const rosterDrivers = await this.drivers.find({
       where: {
         status: DriverStatus.ACTIVE,
@@ -190,11 +187,105 @@ export class AttendanceService {
       },
     });
 
+    return this.buildRosterForSite(site, rosterDrivers, query);
+  }
+
+  /** Loads roster rows for multiple sites in one request (one HTTP round-trip). */
+  async getRosterBulk(
+    query: AttendanceRosterBulkQueryDto,
+  ): Promise<{ bySite: Record<string, AttendanceDay[]> }> {
+    const siteIds = query.siteIds
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    if (siteIds.length === 0) {
+      return { bySite: {} };
+    }
+
+    const sites = await this.sites.find({ where: { id: In(siteIds) } });
+    const siteById = new Map(sites.map((site) => [site.id, site]));
+    const activeDrivers = await this.drivers.find({
+      where: { status: DriverStatus.ACTIVE },
+    });
+    const driversByHomeSite = new Map<string, Driver[]>();
+    for (const driver of activeDrivers) {
+      const homeSite = driver.homeSite?.trim();
+      if (!homeSite) continue;
+      const bucket = driversByHomeSite.get(homeSite) ?? [];
+      bucket.push(driver);
+      driversByHomeSite.set(homeSite, bucket);
+    }
+
+    const bySite: Record<string, AttendanceDay[]> = {};
+    await Promise.all(
+      siteIds.map(async (siteId) => {
+        const site = siteById.get(siteId);
+        if (!site) {
+          bySite[siteId] = [];
+          return;
+        }
+        const rosterDrivers = driversByHomeSite.get(site.name) ?? [];
+        bySite[siteId] = await this.buildRosterForSite(site, rosterDrivers, {
+          date: query.date,
+          siteId,
+          status: query.status,
+          search: query.search,
+        });
+      }),
+    );
+    return { bySite };
+  }
+
+  /**
+   * Lean driver-day load for the fuel module. Skips punch hydration and
+   * attendance status recalculation — fuel reads rely on cached
+   * `workDistanceKm` and odometer summaries loaded separately.
+   */
+  async getDriverFuelDays(
+    driverId: string,
+    query: AttendanceDriverHistoryQueryDto,
+  ): Promise<{ driver: Driver | null; days: AttendanceDay[] }> {
+    const fromMs = new Date(`${query.from}T00:00:00`).getTime();
+    const toMs = new Date(`${query.to}T00:00:00`).getTime();
+    const maxSpanMs = 180 * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > maxSpanMs) {
+      throw new BadRequestException(
+        'Date range cannot exceed 180 days. Narrow from/to and try again.',
+      );
+    }
+
+    const driver = await this.drivers.findOne({
+      where: { id: driverId },
+      relations: { assignedVehicle: true },
+    });
+    if (!driver) {
+      throw new NotFoundException(`Driver ${driverId} not found`);
+    }
+
+    const days = await this.days
+      .createQueryBuilder('day')
+      .leftJoinAndSelect('day.site', 'site')
+      .where('day.driverId = :driverId', { driverId })
+      .andWhere('day.date >= :from', { from: query.from })
+      .andWhere('day.date <= :to', { to: query.to })
+      .orderBy('day.date', 'ASC')
+      .getMany();
+
+    return { driver, days };
+  }
+
+  private async buildRosterForSite(
+    site: Site,
+    rosterDrivers: Driver[],
+    query: Pick<
+      AttendanceRosterQueryDto,
+      'date' | 'siteId' | 'status' | 'search'
+    >,
+  ): Promise<AttendanceDay[]> {
     if (rosterDrivers.length > 0) {
       await this.ensureDaysForDrivers(rosterDrivers, site.id, query.date);
     }
 
-    // Re-read so we get the relations (driver, site, punches) in one shot.
     let rows = await this.days.find({
       where: { siteId: query.siteId, date: query.date },
       relations: {
@@ -205,8 +296,6 @@ export class AttendanceService {
       order: { createdAt: 'ASC' },
     });
 
-    // Recalculate derived statuses and persist any that drifted. ON_LEAVE is
-    // a manual override and is left alone.
     rows = await this.recalcAndPersistDays(rows);
 
     if (query.status) {
@@ -233,28 +322,6 @@ export class AttendanceService {
 
     await this.attachOdometerToDays(rows);
     return rows;
-  }
-
-  /** Loads roster rows for multiple sites in one request (one HTTP round-trip). */
-  async getRosterBulk(
-    query: AttendanceRosterBulkQueryDto,
-  ): Promise<{ bySite: Record<string, AttendanceDay[]> }> {
-    const siteIds = query.siteIds
-      .split(',')
-      .map((id) => id.trim())
-      .filter(Boolean);
-    const bySite: Record<string, AttendanceDay[]> = {};
-    await Promise.all(
-      siteIds.map(async (siteId) => {
-        bySite[siteId] = await this.getRoster({
-          date: query.date,
-          siteId,
-          status: query.status,
-          search: query.search,
-        });
-      }),
-    );
-    return { bySite };
   }
 
   // Returns every AttendanceDay row for `driverId` between `from` and `to`
@@ -794,12 +861,13 @@ export class AttendanceService {
     rows: AttendanceDay[],
   ): Promise<AttendanceDay[]> {
     const today = todayDateKey();
-    for (const day of rows) {
-      if (day.date < today && !day.autoClosedAt) {
-        // autoCloseIfStale mutates day.punches / day.autoClosedAt in-place
-        // so the subsequent deriveDayStatus call sees the updated state.
-        await this.autoCloseIfStale(day);
-      }
+    const staleCandidates = rows.filter(
+      (day) => day.date < today && !day.autoClosedAt,
+    );
+    for (const day of staleCandidates) {
+      // autoCloseIfStale mutates day.punches / day.autoClosedAt in-place
+      // so the subsequent deriveDayStatus call sees the updated state.
+      await this.autoCloseIfStale(day);
     }
 
     const dirty: AttendanceDay[] = [];
