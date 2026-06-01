@@ -8,6 +8,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, LessThanOrEqual, Repository } from 'typeorm';
 
+import {
+  buildNextCursor,
+  PageResponse,
+  parseCursor,
+  resolveLimit,
+} from '../../common/dto/pagination.dto';
 import { DriverStatus, LicenseClass } from '../../common/enums';
 import { SiteService } from '../sites/site.service';
 import { VehicleService } from '../vehicles/vehicle.service';
@@ -33,24 +39,71 @@ export class DriverService implements OnModuleInit {
     await this.backfillLegacyLicenseClasses();
   }
 
-  async findAll(query: DriverQueryDto = {}): Promise<Driver[]> {
-    const baseWhere: FindOptionsWhere<Driver> = {};
-    if (query.status) baseWhere.status = query.status;
-    if (query.licenseClass) baseWhere.licenseClass = query.licenseClass;
-    if (query.site) baseWhere.homeSite = query.site;
+  async findAll(query: DriverQueryDto = {}): Promise<PageResponse<Driver>> {
+    const limit = resolveLimit(query.limit);
+    const cursor = parseCursor(query.cursor);
 
-    const where: FindOptionsWhere<Driver>[] = query.search
-      ? [
-          { ...baseWhere, firstName: ILike(`%${query.search}%`) },
-          { ...baseWhere, lastName: ILike(`%${query.search}%`) },
-          { ...baseWhere, employeeId: ILike(`%${query.search}%`) },
-          { ...baseWhere, licenseNumber: ILike(`%${query.search}%`) },
-        ]
-      : [baseWhere];
+    const qb = this.repo
+      .createQueryBuilder('driver')
+      .leftJoinAndSelect('driver.assignedVehicle', 'assignedVehicle');
 
+    if (query.status) {
+      qb.andWhere('driver.status = :status', { status: query.status });
+    }
+    if (query.licenseClass) {
+      qb.andWhere('driver.licenseClass = :licenseClass', {
+        licenseClass: query.licenseClass,
+      });
+    }
+    if (query.site) {
+      qb.andWhere('driver.homeSite = :site', { site: query.site });
+    }
+    if (query.search) {
+      const needle = `%${query.search}%`;
+      qb.andWhere(
+        '(driver.firstName ILIKE :needle OR driver.lastName ILIKE :needle OR driver.employeeId ILIKE :needle OR driver.licenseNumber ILIKE :needle)',
+        { needle },
+      );
+    }
+    if (cursor) {
+      qb.andWhere(
+        '(driver.createdAt < :cursorAt OR (driver.createdAt = :cursorAt AND driver.id < :cursorId))',
+        { cursorAt: cursor.createdAt, cursorId: cursor.id },
+      );
+    }
+
+    qb.orderBy('driver.createdAt', 'DESC').addOrderBy('driver.id', 'DESC');
+    qb.take(limit + 1);
+
+    const rows = await qb.getMany();
+    return {
+      data: rows.slice(0, limit),
+      nextCursor: buildNextCursor(rows, limit),
+    };
+  }
+
+  async findAllLookup(): Promise<
+    Pick<
+      Driver,
+      | 'id'
+      | 'firstName'
+      | 'lastName'
+      | 'employeeId'
+      | 'assignedVehicleId'
+      | 'status'
+      | 'homeSite'
+    >[]
+  > {
     return this.repo.find({
-      where,
-      relations: { assignedVehicle: true },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        employeeId: true,
+        assignedVehicleId: true,
+        status: true,
+        homeSite: true,
+      },
       order: { lastName: 'ASC', firstName: 'ASC' },
     });
   }
@@ -209,16 +262,16 @@ export class DriverService implements OnModuleInit {
   // before "EMP-99" lexicographically, which would break sequencing once
   // we cross the 99 -> 100 boundary.
   private async nextEmployeeId(): Promise<string> {
-    const existing = await this.repo.find({ select: { employeeId: true } });
-    let max = 0;
-    for (const d of existing) {
-      const match = d.employeeId?.match(/^EMP-(\d+)$/);
-      if (match) {
-        const num = Number.parseInt(match[1], 10);
-        if (Number.isFinite(num) && num > max) max = num;
-      }
-    }
-    return `EMP-${String(max + 1).padStart(3, '0')}`;
+    const row = await this.repo
+      .createQueryBuilder('driver')
+      .select(
+        `MAX(CAST(SUBSTRING(driver.employeeId FROM 'EMP-([0-9]+)') AS INTEGER))`,
+        'maxNum',
+      )
+      .where("driver.employeeId ~ '^EMP-[0-9]+$'")
+      .getRawOne<{ maxNum: string | null }>();
+    const max = row?.maxNum ? Number.parseInt(row.maxNum, 10) : 0;
+    return `EMP-${String((Number.isFinite(max) ? max : 0) + 1).padStart(3, '0')}`;
   }
 
   // One-shot rewrite of legacy employee ids that don't follow the EMP-NNN

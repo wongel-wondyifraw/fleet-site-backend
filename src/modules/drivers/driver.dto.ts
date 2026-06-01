@@ -9,6 +9,7 @@ import {
   Matches,
 } from 'class-validator';
 
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { DriverStatus, LicenseClass } from '../../common/enums';
 
 export class CreateDriverDto {
@@ -111,7 +112,7 @@ export class AssignVehicleDto {
   vehicleId!: string;
 }
 
-export class DriverQueryDto {
+export class DriverQueryDto extends PaginationDto {
   @IsOptional()
   @IsEnum(DriverStatus)
   status?: DriverStatus;

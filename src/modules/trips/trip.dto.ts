@@ -1,3 +1,4 @@
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsDateString,
@@ -7,8 +8,10 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
 } from 'class-validator';
 
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { TripStatus } from '../../common/enums';
 
 export class CreateTripDto {
@@ -169,7 +172,7 @@ export class SetTripStatusDto {
   distanceKm?: number | null;
 }
 
-export class TripQueryDto {
+export class TripQueryDto extends PaginationDto {
   @IsOptional()
   @IsUUID()
   vehicleId?: string;
@@ -181,4 +184,28 @@ export class TripQueryDto {
   @IsOptional()
   @IsEnum(TripStatus)
   status?: TripStatus;
+
+  /** Single calendar day (YYYY-MM-DD) matched against the trip effective date. */
+  @IsOptional()
+  @IsDateString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  date?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  /** IANA timezone for date matching (defaults to UTC). */
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+
+  /** When true and `date` is set, include `meta.targetForDate` in the list response. */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  includeTarget?: boolean;
 }

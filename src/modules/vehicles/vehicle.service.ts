@@ -7,6 +7,12 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, QueryFailedError, Repository } from 'typeorm';
 
+import {
+  buildNextCursor,
+  PageResponse,
+  parseCursor,
+  resolveLimit,
+} from '../../common/dto/pagination.dto';
 import { VehicleStatus } from '../../common/enums';
 import {
   CreateVehicleDto,
@@ -26,12 +32,54 @@ export class VehicleService implements OnModuleInit {
     await this.backfillMissingAssetNumbers();
   }
 
-  async findAll(query: VehicleQueryDto = {}): Promise<Vehicle[]> {
-    const where: FindOptionsWhere<Vehicle> = {};
-    if (query.status) where.status = query.status;
-    if (query.type) where.type = query.type;
-    if (query.site) where.assignedSite = query.site;
-    return this.repo.find({ where, order: { createdAt: 'DESC' } });
+  async findAll(query: VehicleQueryDto = {}): Promise<PageResponse<Vehicle>> {
+    const limit = resolveLimit(query.limit);
+    const cursor = parseCursor(query.cursor);
+    const qb = this.repo.createQueryBuilder('vehicle');
+
+    if (query.status) {
+      qb.andWhere('vehicle.status = :status', { status: query.status });
+    }
+    if (query.type) {
+      qb.andWhere('vehicle.type = :type', { type: query.type });
+    }
+    if (query.site) {
+      qb.andWhere('vehicle.assignedSite = :site', { site: query.site });
+    }
+    if (cursor) {
+      qb.andWhere(
+        '(vehicle.createdAt < :cursorAt OR (vehicle.createdAt = :cursorAt AND vehicle.id < :cursorId))',
+        { cursorAt: cursor.createdAt, cursorId: cursor.id },
+      );
+    }
+
+    qb.orderBy('vehicle.createdAt', 'DESC').addOrderBy('vehicle.id', 'DESC');
+    qb.take(limit + 1);
+
+    const rows = await qb.getMany();
+    return {
+      data: rows.slice(0, limit),
+      nextCursor: buildNextCursor(rows, limit),
+    };
+  }
+
+  async findAllLookup(): Promise<
+    Pick<
+      Vehicle,
+      'id' | 'assetNumber' | 'plateNumber' | 'type' | 'status' | 'assignedSite'
+    >[]
+  > {
+    return this.repo.find({
+      select: {
+        id: true,
+        assetNumber: true,
+        plateNumber: true,
+        type: true,
+        status: true,
+        assignedSite: true,
+      },
+      order: { assetNumber: 'ASC', plateNumber: 'ASC' },
+    });
   }
 
   async findOne(id: string): Promise<Vehicle> {
@@ -110,16 +158,16 @@ export class VehicleService implements OnModuleInit {
   // before "AST-99" lexicographically, which would break sequencing once we
   // cross the 99 -> 100 boundary.
   private async nextAssetNumber(): Promise<string> {
-    const existing = await this.repo.find({ select: { assetNumber: true } });
-    let max = 0;
-    for (const v of existing) {
-      const match = v.assetNumber?.match(/^AST-(\d+)$/);
-      if (match) {
-        const num = Number.parseInt(match[1], 10);
-        if (Number.isFinite(num) && num > max) max = num;
-      }
-    }
-    return `AST-${String(max + 1).padStart(3, '0')}`;
+    const row = await this.repo
+      .createQueryBuilder('vehicle')
+      .select(
+        `MAX(CAST(SUBSTRING(vehicle.assetNumber FROM 'AST-([0-9]+)') AS INTEGER))`,
+        'maxNum',
+      )
+      .where("vehicle.assetNumber ~ '^AST-[0-9]+$'")
+      .getRawOne<{ maxNum: string | null }>();
+    const max = row?.maxNum ? Number.parseInt(row.maxNum, 10) : 0;
+    return `AST-${String((Number.isFinite(max) ? max : 0) + 1).padStart(3, '0')}`;
   }
 
   private async backfillMissingAssetNumbers(): Promise<void> {

@@ -103,6 +103,23 @@ export class AttendanceQueryDto {
 // New event-log DTOs for the AttendanceDay + AttendancePunch model.
 // ---------------------------------------------------------------------------
 
+export class AttendanceRosterBulkQueryDto {
+  @IsDateString()
+  date!: string;
+
+  /** Comma-separated site UUIDs. */
+  @IsString()
+  siteIds!: string;
+
+  @IsOptional()
+  @IsEnum(AttendanceDayStatus)
+  status?: AttendanceDayStatus;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
+}
+
 export class AttendanceRosterQueryDto {
   // YYYY-MM-DD; the service uses this as the literal `date` column value.
   @IsDateString()

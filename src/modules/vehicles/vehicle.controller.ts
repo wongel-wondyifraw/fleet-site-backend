@@ -29,6 +29,11 @@ export class VehicleController {
     return this.vehicles.findAll(query);
   }
 
+  @Get('lookup')
+  lookup() {
+    return this.vehicles.findAllLookup();
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.vehicles.findOne(id);

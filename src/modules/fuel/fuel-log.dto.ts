@@ -8,6 +8,7 @@ import {
   Min,
 } from 'class-validator';
 
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { FuelType } from '../../common/enums';
 
 export class CreateFuelLogDto {
@@ -81,7 +82,7 @@ export class UpdateFuelLogDto {
   notes?: string | null;
 }
 
-export class FuelLogQueryDto {
+export class FuelLogQueryDto extends PaginationDto {
   @IsOptional()
   @IsUUID()
   vehicleId?: string;

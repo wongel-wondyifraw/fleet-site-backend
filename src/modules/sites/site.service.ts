@@ -34,8 +34,6 @@ export class SiteService {
 
     return this.repo.find({
       where,
-      // Include assignees so the UI can render them in the list.
-      relations: { users: true },
       order: { name: 'ASC' },
     });
   }
@@ -43,7 +41,6 @@ export class SiteService {
   async findActive(): Promise<Site[]> {
     return this.repo.find({
       where: { status: SiteStatus.ACTIVE },
-      relations: { users: true },
       order: { name: 'ASC' },
     });
   }

@@ -15,6 +15,7 @@ import {
 import {
   AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
+  AttendanceRosterBulkQueryDto,
   AttendanceRosterQueryDto,
   CheckInDto,
   CheckOutDto,
@@ -39,6 +40,11 @@ export class AttendanceController {
   @Get('roster')
   getRoster(@Query() query: AttendanceRosterQueryDto) {
     return this.attendance.getRoster(query);
+  }
+
+  @Get('roster/bulk')
+  getRosterBulk(@Query() query: AttendanceRosterBulkQueryDto) {
+    return this.attendance.getRosterBulk(query);
   }
 
   // Per-driver attendance history for the detail page. Declared before the

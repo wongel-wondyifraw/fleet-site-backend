@@ -7,11 +7,23 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Not, Repository } from 'typeorm';
 
+import {
+  buildNextCursor,
+  PageResponse,
+  parseCursor,
+  resolveLimit,
+} from '../../common/dto/pagination.dto';
 import { TripStatus } from '../../common/enums';
+import { TripTargetService } from '../trip-targets/trip-target.service';
 import { DriverService } from '../drivers/driver.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import { CreateTripDto, TripQueryDto, UpdateTripDto } from './trip.dto';
 import { Trip } from './trip.entity';
+import {
+  toTripListItem,
+  TripListItem,
+  TripsListMeta,
+} from './trip-list.types';
 
 // Whitelist of state transitions allowed through the checkout / check-in /
 // cancel actions. Anything else is rejected with 400 so the UI can never
@@ -23,6 +35,8 @@ const ALLOWED_TRANSITIONS: Record<TripStatus, TripStatus[]> = {
   [TripStatus.CANCELLED]: [],
 };
 
+const EFFECTIVE_DATE_SQL = `DATE(timezone(:tz, COALESCE(trip.completedAt, trip.startedAt, trip.scheduledAt, trip.createdAt)))`;
+
 @Injectable()
 export class TripService {
   constructor(
@@ -30,18 +44,82 @@ export class TripService {
     private readonly repo: Repository<Trip>,
     private readonly vehicles: VehicleService,
     private readonly drivers: DriverService,
+    private readonly tripTargets: TripTargetService,
   ) {}
 
-  async findAll(query: TripQueryDto = {}): Promise<Trip[]> {
-    const where: FindOptionsWhere<Trip> = {};
-    if (query.vehicleId) where.vehicleId = query.vehicleId;
-    if (query.driverId) where.driverId = query.driverId;
-    if (query.status) where.status = query.status;
-    return this.repo.find({
-      where,
-      relations: { vehicle: true, driver: true },
-      order: { createdAt: 'DESC' },
-    });
+  async findAll(
+    query: TripQueryDto = {},
+  ): Promise<PageResponse<TripListItem, TripsListMeta>> {
+    this.assertListQuery(query);
+
+    const limit = resolveLimit(query.limit);
+    const cursor = parseCursor(query.cursor);
+    const tz = query.timezone?.trim() || 'UTC';
+
+    const qb = this.repo
+      .createQueryBuilder('trip')
+      .leftJoinAndSelect('trip.vehicle', 'vehicle')
+      .leftJoinAndSelect('trip.driver', 'driver');
+
+    if (query.vehicleId) {
+      qb.andWhere('trip.vehicleId = :vehicleId', { vehicleId: query.vehicleId });
+    }
+    if (query.driverId) {
+      qb.andWhere('trip.driverId = :driverId', { driverId: query.driverId });
+    }
+    if (query.status) {
+      qb.andWhere('trip.status = :status', { status: query.status });
+    }
+
+    const dateFrom = query.dateFrom ?? query.date;
+    const dateTo = query.dateTo ?? query.date;
+    if (dateFrom && dateTo) {
+      qb.andWhere(`${EFFECTIVE_DATE_SQL} >= :dateFrom::date`, {
+        tz,
+        dateFrom,
+      });
+      qb.andWhere(`${EFFECTIVE_DATE_SQL} <= :dateTo::date`, {
+        tz,
+        dateTo,
+      });
+    }
+
+    if (cursor) {
+      qb.andWhere(
+        '(trip.createdAt < :cursorAt OR (trip.createdAt = :cursorAt AND trip.id < :cursorId))',
+        { cursorAt: cursor.createdAt, cursorId: cursor.id },
+      );
+    }
+
+    qb.orderBy('trip.createdAt', 'DESC').addOrderBy('trip.id', 'DESC');
+    qb.take(limit + 1);
+
+    const rows = await qb.getMany();
+    const nextCursor = buildNextCursor(rows, limit);
+    const data = rows.slice(0, limit).map(toTripListItem);
+
+    const meta: TripsListMeta = {};
+    if (query.includeTarget && query.date) {
+      meta.targetForDate = await this.tripTargets.getEffective(query.date);
+    }
+
+    return { data, nextCursor, meta };
+  }
+
+  private assertListQuery(query: TripQueryDto): void {
+    const hasScope =
+      !!query.vehicleId ||
+      !!query.driverId ||
+      !!query.date ||
+      !!query.dateFrom ||
+      !!query.dateTo ||
+      query.status === TripStatus.IN_PROGRESS;
+
+    if (!hasScope) {
+      throw new BadRequestException(
+        'Provide date, dateFrom/dateTo, vehicleId, driverId, or status=IN_PROGRESS.',
+      );
+    }
   }
 
   async findOne(id: string): Promise<Trip> {
@@ -59,10 +137,6 @@ export class TripService {
     await this.vehicles.findOne(dto.vehicleId);
     if (dto.driverId) {
       await this.drivers.findOne(dto.driverId);
-      // Business rule: a driver can only ever have one trip in
-      // IN_PROGRESS at a time. Block any new trip creation (in any
-      // status) while the chosen driver is on an active trip — the
-      // operator should close out the current trip first.
       await this.assertDriverNotBusy(dto.driverId);
     }
 
@@ -78,10 +152,6 @@ export class TripService {
   async update(id: string, dto: UpdateTripDto): Promise<Trip> {
     const trip = await this.findOne(id);
 
-    // Business rule: only PLANNED trips are editable. Once a trip has
-    // moved to IN_PROGRESS / COMPLETED / CANCELLED its record is
-    // historical and can only be transitioned through the dedicated
-    // /status endpoint.
     if (trip.status !== TripStatus.PLANNED) {
       throw new ConflictException(
         `Only planned trips can be edited (current status: ${trip.status}).`,
@@ -93,8 +163,6 @@ export class TripService {
     }
     if (dto.driverId) {
       await this.drivers.findOne(dto.driverId);
-      // If the driver is being changed, the new one must not already
-      // be on an in-progress trip elsewhere — same rationale as create.
       if (dto.driverId !== trip.driverId) {
         await this.assertDriverNotBusy(dto.driverId);
       }
@@ -111,9 +179,6 @@ export class TripService {
             : null,
     });
 
-    // Mirror the auto-stamping that setStatus does so updates that touch
-    // status from any path (form edit or status action) keep the trip
-    // timestamps in sync.
     if (dto.status && dto.status !== previousStatus) {
       stampStatusTimestamps(trip, dto.status);
     }
@@ -122,17 +187,6 @@ export class TripService {
     return this.findOne(id);
   }
 
-  // Dedicated status-transition endpoint used by the row action buttons
-  // (Trip Checkout / Trip Checkin / Cancel Trip). Centralises the
-  // start/complete timestamp side-effects so the UI doesn't have to manage
-  // them or risk drifting clocks across client devices.
-  //
-  // The optional `distanceKm` is honoured only for the COMPLETED
-  // transition. The client computes it via the LocationIQ Directions
-  // API at check-in time and sends it here so we can persist the final
-  // route distance with the trip record. We don't recalculate or
-  // overwrite an existing value — if a trip is already completed and
-  // has a distance, it stays as-is.
   async setStatus(
     id: string,
     next: TripStatus,
@@ -148,10 +202,6 @@ export class TripService {
         `Cannot move trip from ${trip.status} to ${next}`,
       );
     }
-    // Same one-active-trip-per-driver rule kicks in when transitioning
-    // an existing PLANNED trip to IN_PROGRESS — covers the case where a
-    // PLANNED trip predates the active one and the operator tries to
-    // check it out while the driver is still on the road.
     if (next === TripStatus.IN_PROGRESS && trip.driverId) {
       await this.assertDriverNotBusy(trip.driverId, trip.id);
     }
@@ -163,9 +213,6 @@ export class TripService {
       typeof distanceKm === 'number' &&
       Number.isFinite(distanceKm) &&
       distanceKm >= 0 &&
-      // Only fill in the distance if we don't already have one — keeps
-      // an inadvertent re-check-in from clobbering an authoritative
-      // value (e.g. one set later via the regular update endpoint).
       (trip.distanceKm === null || trip.distanceKm === undefined)
     ) {
       trip.distanceKm = distanceKm;
@@ -175,10 +222,6 @@ export class TripService {
   }
 
   async remove(id: string): Promise<void> {
-    // Business rule: in-progress trips cannot be deleted. They must be
-    // checked in or cancelled first so the row keeps a clean audit
-    // trail (started/completed timestamps survive instead of being
-    // wiped out by a mid-flight delete).
     const trip = await this.repo.findOne({ where: { id } });
     if (!trip) {
       throw new NotFoundException(`Trip ${id} not found`);
@@ -191,10 +234,6 @@ export class TripService {
     await this.repo.delete(id);
   }
 
-  // Rejects with 409 if the driver currently has a different
-  // IN_PROGRESS trip on the books. `excludeTripId` lets the caller
-  // ignore the row it's actively transitioning so re-saving an already
-  // in-progress trip doesn't trip on itself.
   private async assertDriverNotBusy(
     driverId: string,
     excludeTripId?: string,
@@ -213,9 +252,6 @@ export class TripService {
   }
 }
 
-// Mutates the trip in place to record the start/complete timestamps that
-// correspond to a target status. We never overwrite an existing timestamp
-// so re-saving an already-progressed trip can't corrupt audit history.
 function stampStatusTimestamps(trip: Trip, next: TripStatus): void {
   const now = new Date();
   if (next === TripStatus.IN_PROGRESS && !trip.startedAt) {

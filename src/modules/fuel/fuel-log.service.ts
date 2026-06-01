@@ -1,7 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, FindOptionsWhere, Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 
+import {
+  buildNextCursor,
+  PageResponse,
+  parseCursor,
+  resolveLimit,
+} from '../../common/dto/pagination.dto';
 import { CalculatedService } from '../../common/calculated.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
@@ -20,18 +30,44 @@ export class FuelLogService {
     private readonly calculated: CalculatedService,
   ) {}
 
-  async findAll(query: FuelLogQueryDto = {}): Promise<FuelLog[]> {
-    const where: FindOptionsWhere<FuelLog> = {};
-    if (query.vehicleId) where.vehicleId = query.vehicleId;
-    if (query.driverId) where.driverId = query.driverId;
-    if (query.from && query.to) {
-      where.fillDate = Between(new Date(query.from), new Date(query.to));
+  async findAll(query: FuelLogQueryDto = {}): Promise<PageResponse<FuelLog>> {
+    if (!query.vehicleId && !(query.from && query.to)) {
+      throw new BadRequestException(
+        'Provide vehicleId or both from and to date filters.',
+      );
     }
-    return this.repo.find({
-      where,
-      relations: { vehicle: true },
-      order: { fillDate: 'DESC' },
-    });
+
+    const limit = resolveLimit(query.limit);
+    const cursor = parseCursor(query.cursor);
+    const qb = this.repo.createQueryBuilder('log');
+
+    if (query.vehicleId) {
+      qb.andWhere('log.vehicleId = :vehicleId', { vehicleId: query.vehicleId });
+    }
+    if (query.driverId) {
+      qb.andWhere('log.driverId = :driverId', { driverId: query.driverId });
+    }
+    if (query.from && query.to) {
+      qb.andWhere('log.fillDate BETWEEN :from AND :to', {
+        from: new Date(query.from),
+        to: new Date(query.to),
+      });
+    }
+    if (cursor) {
+      qb.andWhere(
+        '(log.createdAt < :cursorAt OR (log.createdAt = :cursorAt AND log.id < :cursorId))',
+        { cursorAt: cursor.createdAt, cursorId: cursor.id },
+      );
+    }
+
+    qb.orderBy('log.fillDate', 'DESC').addOrderBy('log.id', 'DESC');
+    qb.take(limit + 1);
+
+    const rows = await qb.getMany();
+    return {
+      data: rows.slice(0, limit),
+      nextCursor: buildNextCursor(rows, limit),
+    };
   }
 
   async findOne(id: string): Promise<FuelLog> {

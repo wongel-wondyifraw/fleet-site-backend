@@ -15,6 +15,7 @@ import {
 import { Transform } from 'class-transformer';
 
 // UserRole enum is the source of truth for allowed role strings.
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { UserRole } from '../../common/enums';
 
 // Payload accepted by POST /users (admin-only) when creating a new account.
@@ -106,7 +107,7 @@ export class SetRoleDto {
 }
 
 // Querystring shape for GET /users - all filters are optional and AND-combined.
-export class UserQueryDto {
+export class UserQueryDto extends PaginationDto {
   // Filter by exact role match.
   @IsOptional()
   @IsEnum(UserRole)
@@ -131,4 +132,9 @@ export class UserQueryDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  /** Comma-separated expansions, e.g. `sites`. */
+  @IsOptional()
+  @IsString()
+  expand?: string;
 }

@@ -16,6 +16,12 @@ import * as bcrypt from 'bcrypt';
 // TypeORM types used for typed where clauses, IN(), and ILIKE search.
 import { FindOptionsWhere, ILike, In, Repository } from 'typeorm';
 
+import {
+  buildNextCursor,
+  PageResponse,
+  parseCursor,
+  resolveLimit,
+} from '../../common/dto/pagination.dto';
 // Role enum so we can default and seed the first admin.
 import { UserRole } from '../../common/enums';
 // Site entity is needed because Users have a ManyToMany relation to sites.
@@ -53,47 +59,52 @@ export class UsersService implements OnModuleInit {
     await this.seedAdminIfEmpty();
   }
 
-  // List users with optional filters; relations: sites so the API returns assignments.
-  async findAll(query: UserQueryDto = {}): Promise<User[]> {
-    // Build a strongly-typed where clause one field at a time.
-    const where: FindOptionsWhere<User> = {};
-    // Exact role match when provided.
-    if (query.role) where.role = query.role;
-    // Active/inactive filter when provided (note: explicit false must pass through).
-    if (typeof query.isActive === 'boolean') where.isActive = query.isActive;
-    // Free-text search: applied to firstName OR lastName OR email via array-of-where.
-    const searchClauses = query.search
-      ? [
-          { ...where, firstName: ILike(`%${query.search}%`) },
-          { ...where, lastName: ILike(`%${query.search}%`) },
-          { ...where, email: ILike(`%${query.search}%`) },
-        ]
-      : undefined;
-    // Site filter requires joining the many-to-many; we use the QB for that case.
+  async findAll(query: UserQueryDto = {}): Promise<PageResponse<User>> {
+    const limit = resolveLimit(query.limit);
+    const cursor = parseCursor(query.cursor);
+    const qb = this.users.createQueryBuilder('u');
+    const expandSites = query.expand?.split(',').includes('sites');
+
     if (query.siteId) {
-      // QueryBuilder lets us filter by a related site id cleanly.
-      const qb = this.users
-        .createQueryBuilder('u')
-        .leftJoinAndSelect('u.sites', 's')
-        .where('s.id = :siteId', { siteId: query.siteId });
-      // Apply other filters on top of the site filter.
-      if (query.role) qb.andWhere('u.role = :role', { role: query.role });
-      if (typeof query.isActive === 'boolean')
-        qb.andWhere('u.isActive = :isActive', { isActive: query.isActive });
-      if (query.search)
-        qb.andWhere(
-          '(u.firstName ILIKE :s OR u.lastName ILIKE :s OR u.email ILIKE :s)',
-          { s: `%${query.search}%` },
-        );
-      // Newest first by createdAt for predictable list ordering.
-      return qb.orderBy('u.createdAt', 'DESC').getMany();
+      if (expandSites) {
+        qb.innerJoinAndSelect('u.sites', 'sites').andWhere('sites.id = :siteId', {
+          siteId: query.siteId,
+        });
+      } else {
+        qb.innerJoin('u.sites', 's').andWhere('s.id = :siteId', {
+          siteId: query.siteId,
+        });
+      }
+    } else if (expandSites) {
+      qb.leftJoinAndSelect('u.sites', 'sites');
     }
-    // Standard find path when no site filter is requested.
-    return this.users.find({
-      where: searchClauses ?? where,
-      relations: { sites: true },
-      order: { createdAt: 'DESC' },
-    });
+    if (query.role) {
+      qb.andWhere('u.role = :role', { role: query.role });
+    }
+    if (typeof query.isActive === 'boolean') {
+      qb.andWhere('u.isActive = :isActive', { isActive: query.isActive });
+    }
+    if (query.search) {
+      qb.andWhere(
+        '(u.firstName ILIKE :needle OR u.lastName ILIKE :needle OR u.email ILIKE :needle)',
+        { needle: `%${query.search}%` },
+      );
+    }
+    if (cursor) {
+      qb.andWhere(
+        '(u.createdAt < :cursorAt OR (u.createdAt = :cursorAt AND u.id < :cursorId))',
+        { cursorAt: cursor.createdAt, cursorId: cursor.id },
+      );
+    }
+
+    qb.orderBy('u.createdAt', 'DESC').addOrderBy('u.id', 'DESC');
+    qb.take(limit + 1);
+
+    const rows = await qb.getMany();
+    return {
+      data: rows.slice(0, limit),
+      nextCursor: buildNextCursor(rows, limit),
+    };
   }
 
   // Fetch one user with sites eager-loaded; throws 404 when missing.

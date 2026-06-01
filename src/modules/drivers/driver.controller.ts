@@ -31,6 +31,11 @@ export class DriverController {
     return this.drivers.findAll(query);
   }
 
+  @Get('lookup')
+  lookup() {
+    return this.drivers.findAllLookup();
+  }
+
   @Get('expiring-licenses')
   expiringLicenses(
     @Query('withinDays', new ParseIntPipe({ optional: true }))

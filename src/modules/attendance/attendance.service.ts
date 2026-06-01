@@ -26,6 +26,7 @@ import { Site } from '../sites/site.entity';
 import {
   AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
+  AttendanceRosterBulkQueryDto,
   AttendanceRosterQueryDto,
   CheckInDto,
   CheckOutDto,
@@ -231,6 +232,28 @@ export class AttendanceService {
     return rows;
   }
 
+  /** Loads roster rows for multiple sites in one request (one HTTP round-trip). */
+  async getRosterBulk(
+    query: AttendanceRosterBulkQueryDto,
+  ): Promise<{ bySite: Record<string, AttendanceDay[]> }> {
+    const siteIds = query.siteIds
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean);
+    const bySite: Record<string, AttendanceDay[]> = {};
+    await Promise.all(
+      siteIds.map(async (siteId) => {
+        bySite[siteId] = await this.getRoster({
+          date: query.date,
+          siteId,
+          status: query.status,
+          search: query.search,
+        });
+      }),
+    );
+    return { bySite };
+  }
+
   // Returns every AttendanceDay row for `driverId` between `from` and `to`
   // (inclusive), ordered chronologically with punches eager-loaded. Used by
   // the per-driver detail page to render a date-range timeline, working-
@@ -248,6 +271,15 @@ export class AttendanceService {
     driverId: string,
     query: AttendanceDriverHistoryQueryDto,
   ): Promise<{ driver: Driver | null; days: AttendanceDay[] }> {
+    const fromMs = new Date(`${query.from}T00:00:00`).getTime();
+    const toMs = new Date(`${query.to}T00:00:00`).getTime();
+    const maxSpanMs = 180 * 24 * 60 * 60 * 1000;
+    if (toMs - fromMs > maxSpanMs) {
+      throw new BadRequestException(
+        'Date range cannot exceed 180 days. Narrow from/to and try again.',
+      );
+    }
+
     const driver = await this.drivers.findOne({
       where: { id: driverId },
       relations: { assignedVehicle: true },

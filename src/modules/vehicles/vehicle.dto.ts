@@ -7,6 +7,7 @@ import {
   Min,
 } from 'class-validator';
 
+import { PaginationDto } from '../../common/dto/pagination.dto';
 import { FuelType, VehicleStatus, VehicleType } from '../../common/enums';
 
 export class CreateVehicleDto {
@@ -78,7 +79,7 @@ export class UpdateVehicleDto {
   assignedSite?: string | null;
 }
 
-export class VehicleQueryDto {
+export class VehicleQueryDto extends PaginationDto {
   @IsOptional()
   @IsEnum(VehicleStatus)
   status?: VehicleStatus;
