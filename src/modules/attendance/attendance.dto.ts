@@ -7,6 +7,7 @@ import {
   IsString,
   IsUUID,
   Min,
+  ValidateIf,
 } from 'class-validator';
 
 import {
@@ -200,4 +201,13 @@ export class UpdateAttendancePunchDto {
   @IsOptional()
   @IsString()
   note?: string | null;
+
+  // Optional odometer correction in kilometres. Pass `null` to clear the
+  // reading tied to this punch. Only valid on DAY_IN / DAY_OUT / LUNCH_*.
+  @IsOptional()
+  @ValidateIf((o: UpdateAttendancePunchDto) => o.odometer !== null)
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  odometer?: number | null;
 }

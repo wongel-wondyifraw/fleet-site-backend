@@ -56,6 +56,15 @@ export enum AttendancePunchType {
   MAINT_IN = 'MAINT_IN',
 }
 
+// Punch types that require an odometer reading (km) when recorded manually.
+// Mirrors the frontend ODOMETER_REQUIRED_PUNCH_TYPES set in attendanceHelpers.
+export const ODOMETER_REQUIRED_PUNCH_TYPES = new Set<AttendancePunchType>([
+  AttendancePunchType.DAY_IN,
+  AttendancePunchType.DAY_OUT,
+  AttendancePunchType.LUNCH_OUT,
+  AttendancePunchType.LUNCH_IN,
+]);
+
 export enum SiteShift {
   DAY = 'DAY',
   NIGHT = 'NIGHT',

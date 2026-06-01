@@ -50,4 +50,8 @@ export class AttendancePunch {
 
   @CreateDateColumn()
   createdAt!: Date;
+
+  // Transient: populated by AttendanceService when serializing roster/history
+  // responses so the UI can pre-fill odometer corrections. Not a DB column.
+  odometer?: string | null;
 }

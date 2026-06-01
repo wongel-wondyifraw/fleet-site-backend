@@ -19,6 +19,7 @@ import {
   AttendancePunchType,
   AttendanceStatus,
   DriverStatus,
+  ODOMETER_REQUIRED_PUNCH_TYPES,
   SiteShift,
 } from '../../common/enums';
 import { Driver } from '../drivers/driver.entity';
@@ -54,6 +55,7 @@ const USER_SETTABLE_DAY_STATUSES = new Set<AttendanceDayStatus>([
 const AUTO_CLOSE_MISSING_DAY_OUT = 'MISSING_DAY_OUT';
 const AUTO_CLOSE_MISSING_LUNCH_RETURN = 'MISSING_LUNCH_RETURN';
 const AUTO_CLOSE_MISSING_MAINT_RETURN = 'MISSING_MAINT_RETURN';
+const AUTO_CLOSE_INCOMPLETE_DISTANCE = 'INCOMPLETE_DISTANCE';
 
 @Injectable()
 export class AttendanceService {
@@ -229,6 +231,7 @@ export class AttendanceService {
       });
     }
 
+    await this.attachOdometerToDays(rows);
     return rows;
   }
 
@@ -302,6 +305,7 @@ export class AttendanceService {
       .getMany();
 
     days = await this.recalcAndPersistDays(days);
+    await this.attachOdometerToDays(days);
     return { driver, days };
   }
 
@@ -312,36 +316,35 @@ export class AttendanceService {
     const day = await this.loadDayForWrite(dayId);
     const punchAt = dto.at ? new Date(dto.at) : new Date();
     this.assertPunchAllowed(day.punches ?? [], dto.type);
+    this.assertOdometerIfRequired(dto.type, dto.odometer);
 
-    const punch = this.punches.create({
-      dayId: day.id,
-      type: dto.type,
-      at: punchAt,
-      actorUserId: dto.actorUserId ?? null,
-      note: dto.note ?? null,
-      isVoided: false,
-    });
-    await this.punches.save(punch);
+    await this.days.manager.transaction(async (manager) => {
+      const punchRepo = manager.getRepository(AttendancePunch);
+      const readingRepo = manager.getRepository(OdometerReading);
 
-    // Persist the odometer reading (if any) in the same logical operation
-    // as the punch. We don't wrap them in an explicit DB transaction here
-    // because the unique index on (punchId) is the real safety net — even
-    // if the reading insert fails we still have a valid punch, and the
-    // distance recompute below simply skips the missing reading.
-    if (dto.odometer !== undefined && dto.odometer !== null) {
-      const driverIdForReading = day.driverId;
-      const vehicleIdForReading = day.driver?.assignedVehicleId ?? null;
-      const reading = this.odometerReadings.create({
-        punchId: punch.id,
+      const punch = punchRepo.create({
         dayId: day.id,
-        driverId: driverIdForReading,
-        vehicleId: vehicleIdForReading,
-        punchType: dto.type,
-        value: dto.odometer.toFixed(2),
-        capturedAt: punchAt,
+        type: dto.type,
+        at: punchAt,
+        actorUserId: dto.actorUserId ?? null,
+        note: dto.note ?? null,
+        isVoided: false,
       });
-      await this.odometerReadings.save(reading);
-    }
+      await punchRepo.save(punch);
+
+      if (dto.odometer !== undefined && dto.odometer !== null) {
+        const reading = readingRepo.create({
+          punchId: punch.id,
+          dayId: day.id,
+          driverId: day.driverId,
+          vehicleId: day.driver?.assignedVehicleId ?? null,
+          punchType: dto.type,
+          value: dto.odometer.toFixed(2),
+          capturedAt: punchAt,
+        });
+        await readingRepo.save(reading);
+      }
+    });
 
     await this.recomputeWorkDistance(day.id);
     return this.recalcSingleDay(day.id);
@@ -383,19 +386,65 @@ export class AttendanceService {
         `Punch ${punchId} is voided and cannot be edited.`,
       );
     }
-    if (dto.at !== undefined) {
-      punch.at = new Date(dto.at);
-      // Keep the linked odometer reading's capturedAt in lockstep with the
-      // punch time so timestamps stay consistent across the two tables.
-      await this.odometerReadings.update(
-        { punchId: punch.id },
-        { capturedAt: punch.at },
-      );
+
+    if (dto.odometer !== undefined && dto.odometer !== null) {
+      if (!ODOMETER_REQUIRED_PUNCH_TYPES.has(punch.type)) {
+        throw new BadRequestException(
+          `Odometer cannot be set on punch type ${punch.type}.`,
+        );
+      }
     }
-    if (dto.note !== undefined) {
-      punch.note = dto.note;
-    }
-    await this.punches.save(punch);
+
+    const dayForReading =
+      dto.odometer !== undefined
+        ? await this.loadDayForWrite(punch.dayId)
+        : null;
+
+    await this.days.manager.transaction(async (manager) => {
+      const punchRepo = manager.getRepository(AttendancePunch);
+      const readingRepo = manager.getRepository(OdometerReading);
+
+      if (dto.at !== undefined) {
+        punch.at = new Date(dto.at);
+        await readingRepo.update(
+          { punchId: punch.id },
+          { capturedAt: punch.at },
+        );
+      }
+      if (dto.note !== undefined) {
+        punch.note = dto.note;
+      }
+      await punchRepo.save(punch);
+
+      if (dto.odometer !== undefined) {
+        if (dto.odometer === null) {
+          await readingRepo.delete({ punchId: punch.id });
+        } else {
+          const existing = await readingRepo.findOne({
+            where: { punchId: punch.id },
+          });
+          const vehicleId = dayForReading?.driver?.assignedVehicleId ?? null;
+          if (existing) {
+            existing.value = dto.odometer.toFixed(2);
+            existing.punchType = punch.type;
+            existing.capturedAt = punch.at;
+            existing.vehicleId = vehicleId;
+            await readingRepo.save(existing);
+          } else if (dayForReading) {
+            const reading = readingRepo.create({
+              punchId: punch.id,
+              dayId: dayForReading.id,
+              driverId: dayForReading.driverId,
+              vehicleId,
+              punchType: punch.type,
+              value: dto.odometer.toFixed(2),
+              capturedAt: punch.at,
+            });
+            await readingRepo.save(reading);
+          }
+        }
+      }
+    });
 
     await this.recomputeWorkDistance(punch.dayId);
     return this.recalcSingleDay(punch.dayId);
@@ -409,20 +458,20 @@ export class AttendanceService {
       throw new NotFoundException(`Attendance punch ${punchId} not found`);
     }
     if (punch.isVoided) {
-      // Idempotent: voiding an already-voided punch just returns the day.
       return this.recalcSingleDay(punch.dayId);
     }
-    punch.isVoided = true;
-    const stamp = new Date().toISOString();
-    const auditLine = `voided at ${stamp}`;
-    punch.note = punch.note ? `${punch.note} | ${auditLine}` : auditLine;
-    await this.punches.save(punch);
 
-    // A voided punch's odometer reading is also removed from the distance
-    // calculation. We delete the reading row outright (rather than soft-
-    // flagging it) because nothing else points at it — the fuel module
-    // only consumes readings tied to live punches.
-    await this.odometerReadings.delete({ punchId: punch.id });
+    await this.days.manager.transaction(async (manager) => {
+      const punchRepo = manager.getRepository(AttendancePunch);
+      const readingRepo = manager.getRepository(OdometerReading);
+
+      punch.isVoided = true;
+      const stamp = new Date().toISOString();
+      const auditLine = `voided at ${stamp}`;
+      punch.note = punch.note ? `${punch.note} | ${auditLine}` : auditLine;
+      await punchRepo.save(punch);
+      await readingRepo.delete({ punchId: punch.id });
+    });
 
     await this.recomputeWorkDistance(punch.dayId);
     return this.recalcSingleDay(punch.dayId);
@@ -699,6 +748,17 @@ export class AttendanceService {
     // the cache still matters when the missing-lunch fallback kicks in
     // (see recomputeWorkDistance), so re-run it here.
     await this.recomputeWorkDistance(day.id);
+
+    if (await this.hasIncompleteDistance(day.id)) {
+      const withIncomplete = reasonString.includes(AUTO_CLOSE_INCOMPLETE_DISTANCE)
+        ? reasonString
+        : reasonString
+          ? `${reasonString},${AUTO_CLOSE_INCOMPLETE_DISTANCE}`
+          : AUTO_CLOSE_INCOMPLETE_DISTANCE;
+      await this.days.update({ id: day.id }, { autoCloseReason: withIncomplete });
+      day.autoCloseReason = withIncomplete;
+    }
+
     return day;
   }
 
@@ -717,6 +777,7 @@ export class AttendanceService {
       throw new NotFoundException(`Attendance day ${dayId} not found`);
     }
     const recalculated = await this.recalcAndPersistDays([day]);
+    await this.attachOdometerToDays(recalculated);
     return recalculated[0];
   }
 
@@ -757,6 +818,61 @@ export class AttendanceService {
 
   // Throws BadRequestException if `type` cannot be added to the existing
   // punch stream. Caller is responsible for sorting punches by `at` ASC.
+  private assertOdometerIfRequired(
+    type: AttendancePunchType,
+    odometer: number | undefined | null,
+  ): void {
+    if (!ODOMETER_REQUIRED_PUNCH_TYPES.has(type)) return;
+    if (odometer === undefined || odometer === null) {
+      throw new BadRequestException(
+        `Odometer reading is required for ${type}.`,
+      );
+    }
+  }
+
+  // Batch-fetch odometer readings and attach them onto each punch object
+  // so roster/history responses include `punch.odometer` for the UI.
+  private async attachOdometerToDays(days: AttendanceDay[]): Promise<void> {
+    if (days.length === 0) return;
+    const dayIds = days.map((d) => d.id);
+    const readings = await this.odometerReadings.find({
+      where: { dayId: In(dayIds) },
+      select: { punchId: true, value: true },
+    });
+    const byPunchId = new Map(readings.map((r) => [r.punchId, r.value]));
+    for (const day of days) {
+      for (const punch of day.punches ?? []) {
+        const val = byPunchId.get(punch.id);
+        if (val !== undefined) {
+          punch.odometer = val;
+        }
+      }
+    }
+  }
+
+  // True when the day has at least one odometer reading but a live punch
+  // of a required type is missing its reading (partial distance).
+  private async hasIncompleteDistance(dayId: string): Promise<boolean> {
+    const livePunches = await this.punches.find({
+      where: { dayId, isVoided: false },
+      select: { id: true, type: true },
+    });
+    if (livePunches.length === 0) return false;
+
+    const readings = await this.odometerReadings.find({
+      where: { dayId, punchId: In(livePunches.map((p) => p.id)) },
+      select: { punchId: true },
+    });
+    if (readings.length === 0) return false;
+
+    const punchIdsWithReading = new Set(readings.map((r) => r.punchId));
+    return livePunches.some(
+      (p) =>
+        ODOMETER_REQUIRED_PUNCH_TYPES.has(p.type) &&
+        !punchIdsWithReading.has(p.id),
+    );
+  }
+
   private assertPunchAllowed(
     existing: AttendancePunch[],
     type: AttendancePunchType,
