@@ -14,8 +14,11 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
+import { SiteService } from '../sites/site.service';
 import { TripStatus } from '../../common/enums';
 import { ROLE_SITE_MANAGER } from '../access/role-keys';
+import { User } from '../users/user.entity';
 import {
   NOTIFICATION_EVENT,
   NotificationDomainEvent,
@@ -53,9 +56,12 @@ export class TripService {
     private readonly drivers: DriverService,
     private readonly tripTargets: TripTargetService,
     private readonly events: EventEmitter2,
+    private readonly siteScope: SiteScopeService,
+    private readonly sites: SiteService,
   ) {}
 
   async findAll(
+    user: User,
     query: TripQueryDto = {},
   ): Promise<PageResponse<TripListItem, TripsListMeta>> {
     this.assertListQuery(query);
@@ -68,6 +74,12 @@ export class TripService {
       .createQueryBuilder('trip')
       .leftJoinAndSelect('trip.vehicle', 'vehicle')
       .leftJoinAndSelect('trip.driver', 'driver');
+
+    if (query.siteId) {
+      this.siteScope.assertAccess(user, [query.siteId]);
+      qb.andWhere('vehicle.siteId = :siteId', { siteId: query.siteId });
+    }
+    this.siteScope.applyTo(qb, user, { alias: 'vehicle' });
 
     if (query.vehicleId) {
       qb.andWhere('trip.vehicleId = :vehicleId', { vehicleId: query.vehicleId });
@@ -130,7 +142,7 @@ export class TripService {
     }
   }
 
-  async findOne(id: string): Promise<Trip> {
+  async findOne(user: User, id: string): Promise<Trip> {
     const trip = await this.repo.findOne({
       where: { id },
       relations: { vehicle: true, driver: true },
@@ -138,13 +150,14 @@ export class TripService {
     if (!trip) {
       throw new NotFoundException(`Trip ${id} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, trip.vehicle?.siteId ?? null);
     return trip;
   }
 
-  async create(dto: CreateTripDto): Promise<Trip> {
-    await this.vehicles.findOne(dto.vehicleId);
+  async create(user: User, dto: CreateTripDto): Promise<Trip> {
+    await this.vehicles.findOne(user, dto.vehicleId);
     if (dto.driverId) {
-      await this.drivers.findOne(dto.driverId);
+      await this.drivers.findOne(user, dto.driverId);
       await this.assertDriverNotBusy(dto.driverId);
     }
 
@@ -154,11 +167,11 @@ export class TripService {
       scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
     });
     const saved = await this.repo.save(trip);
-    return this.findOne(saved.id);
+    return this.findOne(user, saved.id);
   }
 
-  async update(id: string, dto: UpdateTripDto): Promise<Trip> {
-    const trip = await this.findOne(id);
+  async update(user: User, id: string, dto: UpdateTripDto): Promise<Trip> {
+    const trip = await this.findOne(user, id);
 
     if (trip.status !== TripStatus.PLANNED) {
       throw new ConflictException(
@@ -167,10 +180,10 @@ export class TripService {
     }
 
     if (dto.vehicleId && dto.vehicleId !== trip.vehicleId) {
-      await this.vehicles.findOne(dto.vehicleId);
+      await this.vehicles.findOne(user, dto.vehicleId);
     }
     if (dto.driverId) {
-      await this.drivers.findOne(dto.driverId);
+      await this.drivers.findOne(user, dto.driverId);
       if (dto.driverId !== trip.driverId) {
         await this.assertDriverNotBusy(dto.driverId);
       }
@@ -192,19 +205,20 @@ export class TripService {
     }
 
     await this.repo.save(trip);
-    const updated = await this.findOne(id);
+    const updated = await this.findOne(user, id);
     if (dto.status && dto.status !== previousStatus) {
-      this.emitTripStatusNotification(updated, dto.status);
+      await this.emitTripStatusNotification(updated, dto.status);
     }
     return updated;
   }
 
   async setStatus(
+    user: User,
     id: string,
     next: TripStatus,
     distanceKm?: number | null,
   ): Promise<Trip> {
-    const trip = await this.findOne(id);
+    const trip = await this.findOne(user, id);
     if (trip.status === next) {
       return trip;
     }
@@ -230,16 +244,13 @@ export class TripService {
       trip.distanceKm = distanceKm;
     }
     await this.repo.save(trip);
-    const updated = await this.findOne(id);
-    this.emitTripStatusNotification(updated, next);
+    const updated = await this.findOne(user, id);
+    await this.emitTripStatusNotification(updated, next);
     return updated;
   }
 
-  async remove(id: string): Promise<void> {
-    const trip = await this.repo.findOne({ where: { id } });
-    if (!trip) {
-      throw new NotFoundException(`Trip ${id} not found`);
-    }
+  async remove(user: User, id: string): Promise<void> {
+    const trip = await this.findOne(user, id);
     if (trip.status === TripStatus.IN_PROGRESS) {
       throw new ConflictException(
         'An in-progress trip cannot be deleted. Check it in or cancel it first.',
@@ -265,13 +276,24 @@ export class TripService {
     }
   }
 
-  private emitTripStatusNotification(trip: Trip, status: TripStatus): void {
+  private async emitTripStatusNotification(
+    trip: Trip,
+    status: TripStatus,
+  ): Promise<void> {
     const vehicleName = trip.vehicle?.assetNumber ?? trip.vehicle?.plateNumber ?? 'Vehicle';
     const driverName = trip.driver
       ? `${trip.driver.firstName} ${trip.driver.lastName}`
       : 'Unassigned driver';
     const route = `${trip.startAddress} to ${trip.endAddress}`;
-    const siteName = trip.vehicle?.assignedSite ?? null;
+    const siteId = trip.vehicle?.siteId ?? null;
+    let siteName: string | null = null;
+    if (siteId) {
+      try {
+        siteName = (await this.sites.findOne(siteId)).name;
+      } catch {
+        siteName = null;
+      }
+    }
 
     const eventByStatus: Partial<Record<TripStatus, NotificationDomainEvent>> = {
       [TripStatus.IN_PROGRESS]: {
@@ -282,6 +304,7 @@ export class TripService {
         message: `${driverName} started ${route}.`,
         href: '/trips',
         siteName,
+        siteId,
         targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.dispatched:${trip.id}`,
         payload: { tripId: trip.id, status },
@@ -294,6 +317,7 @@ export class TripService {
         message: `${driverName} completed ${route}.`,
         href: '/trips',
         siteName,
+        siteId,
         targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.completed:${trip.id}`,
         payload: { tripId: trip.id, status },
@@ -306,6 +330,7 @@ export class TripService {
         message: `${driverName}'s trip from ${route} was cancelled.`,
         href: '/trips',
         siteName,
+        siteId,
         targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.cancelled:${trip.id}`,
         payload: { tripId: trip.id, status },

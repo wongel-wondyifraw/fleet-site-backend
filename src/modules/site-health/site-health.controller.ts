@@ -8,7 +8,7 @@ import {
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
-import { ROLE_ADMIN } from '../access/role-keys';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
 import { SiteService } from '../sites/site.service';
 import { User } from '../users/user.entity';
 import {
@@ -22,6 +22,7 @@ export class SiteHealthController {
   constructor(
     private readonly siteHealth: SiteHealthService,
     private readonly sites: SiteService,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
   @Get('health')
@@ -37,11 +38,12 @@ export class SiteHealthController {
       : [];
 
     if (siteIds.length === 0) {
-      if (user.role?.key !== ROLE_ADMIN) {
-        siteIds = (user.sites ?? []).map((s) => s.id);
-      } else {
+      const allowed = this.siteScope.allowedSiteIds(user);
+      if (allowed === null) {
         const all = await this.sites.findAll({});
         siteIds = all.map((s) => s.id);
+      } else {
+        siteIds = allowed;
       }
     } else {
       siteIds = this.siteHealth.resolveSiteIdsForUser(user, siteIds);

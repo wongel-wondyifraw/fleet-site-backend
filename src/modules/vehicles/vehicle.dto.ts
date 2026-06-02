@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Min,
 } from 'class-validator';
@@ -37,8 +38,8 @@ export class CreateVehicleDto {
   currentOdometer?: number;
 
   @IsOptional()
-  @IsString()
-  assignedSite?: string;
+  @IsUUID()
+  siteId?: string;
 }
 
 export class UpdateVehicleDto {
@@ -75,8 +76,8 @@ export class UpdateVehicleDto {
   currentOdometer?: number;
 
   @IsOptional()
-  @IsString()
-  assignedSite?: string | null;
+  @IsUUID()
+  siteId?: string | null;
 }
 
 export class VehicleQueryDto extends PaginationDto {
@@ -89,6 +90,6 @@ export class VehicleQueryDto extends PaginationDto {
   type?: VehicleType;
 
   @IsOptional()
-  @IsString()
-  site?: string;
+  @IsUUID()
+  siteId?: string;
 }

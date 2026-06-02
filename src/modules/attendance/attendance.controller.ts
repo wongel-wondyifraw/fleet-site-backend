@@ -12,7 +12,9 @@ import {
   Query,
 } from '@nestjs/common';
 
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
+import { User } from '../users/user.entity';
 import {
   AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
@@ -27,78 +29,77 @@ import {
 } from './attendance.dto';
 import { AttendanceService } from './attendance.service';
 
-// Route ordering note: every static-prefixed path (e.g. `roster`, `days/...`,
-// `punches/...`) must be declared BEFORE the legacy `:id` routes so Nest
-// doesn't try to ParseUUIDPipe the literal string "roster" or "days".
 @Controller('attendance')
 export class AttendanceController {
   constructor(private readonly attendance: AttendanceService) {}
 
-  // ---------------------------------------------------------------------
-  // New event-log routes (AttendanceDay + AttendancePunch).
-  // ---------------------------------------------------------------------
-
   @Get('roster')
   @RequiresPermissions('attendance.read')
-  getRoster(@Query() query: AttendanceRosterQueryDto) {
-    return this.attendance.getRoster(query);
+  getRoster(
+    @CurrentUser() user: User,
+    @Query() query: AttendanceRosterQueryDto,
+  ) {
+    return this.attendance.getRoster(user, query);
   }
 
   @Get('roster/bulk')
   @RequiresPermissions('attendance.read')
-  getRosterBulk(@Query() query: AttendanceRosterBulkQueryDto) {
-    return this.attendance.getRosterBulk(query);
+  getRosterBulk(
+    @CurrentUser() user: User,
+    @Query() query: AttendanceRosterBulkQueryDto,
+  ) {
+    return this.attendance.getRosterBulk(user, query);
   }
 
-  // Per-driver attendance history for the detail page. Declared before the
-  // legacy `:id` routes so Nest doesn't try to ParseUUIDPipe the literal
-  // "drivers" segment.
   @Get('drivers/:driverId/history')
   @RequiresPermissions('attendance.read')
   getDriverHistory(
+    @CurrentUser() user: User,
     @Param('driverId', ParseUUIDPipe) driverId: string,
     @Query() query: AttendanceDriverHistoryQueryDto,
   ) {
-    return this.attendance.getDriverHistory(driverId, query);
+    return this.attendance.getDriverHistory(user, driverId, query);
   }
 
   @Post('days/:dayId/punches')
   @RequiresPermissions('attendance.create')
   @HttpCode(HttpStatus.CREATED)
   createPunch(
+    @CurrentUser() user: User,
     @Param('dayId', ParseUUIDPipe) dayId: string,
     @Body() dto: CreateAttendancePunchDto,
   ) {
-    return this.attendance.createPunch(dayId, dto);
+    return this.attendance.createPunch(user, dayId, dto);
   }
 
   @Patch('days/:dayId')
   @RequiresPermissions('attendance.update')
   updateDay(
+    @CurrentUser() user: User,
     @Param('dayId', ParseUUIDPipe) dayId: string,
     @Body() dto: UpdateAttendanceDayDtoNew,
   ) {
-    return this.attendance.updateDayNew(dayId, dto);
+    return this.attendance.updateDayNew(user, dayId, dto);
   }
 
   @Patch('punches/:punchId')
   @RequiresPermissions('attendance.update')
   updatePunch(
+    @CurrentUser() user: User,
     @Param('punchId', ParseUUIDPipe) punchId: string,
     @Body() dto: UpdateAttendancePunchDto,
   ) {
-    return this.attendance.updatePunch(punchId, dto);
+    return this.attendance.updatePunch(user, punchId, dto);
   }
 
   @Delete('punches/:punchId')
   @RequiresPermissions('attendance.delete')
-  deletePunch(@Param('punchId', ParseUUIDPipe) punchId: string) {
-    return this.attendance.voidPunch(punchId);
+  deletePunch(
+    @CurrentUser() user: User,
+    @Param('punchId', ParseUUIDPipe) punchId: string,
+  ) {
+    return this.attendance.voidPunch(user, punchId);
   }
-
-  // ---------------------------------------------------------------------
-  // Legacy attendance routes (preserved for backwards compatibility).
-  // ---------------------------------------------------------------------
 
   @Get()
   @RequiresPermissions('attendance.read')

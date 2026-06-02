@@ -1,7 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ROLE_ADMIN } from '../access/role-keys';
+
+import { SITES_BYPASS_SCOPE } from '../../common/site-scope/site-scope.constants';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -13,26 +14,38 @@ export class NotificationAudienceService {
 
   async resolveRecipients(options: {
     roles: string[];
+    siteId?: string | null;
     siteName?: string | null;
     includeAdmins?: boolean;
   }): Promise<User[]> {
     const roleSet = new Set(options.roles);
-    if (options.includeAdmins !== false) roleSet.add(ROLE_ADMIN);
+    const roles = [...roleSet];
 
     const qb = this.users
       .createQueryBuilder('u')
       .innerJoin('u.role', 'role')
       .leftJoinAndSelect('u.sites', 'site')
-      .where('u.isActive = true')
-      .andWhere('role.key IN (:...roles)', { roles: [...roleSet] });
+      .leftJoin('role.permissions', 'perm')
+      .where('u.isActive = true');
 
-    if (options.siteName) {
+    if (options.includeAdmins !== false) {
+      qb.andWhere('(role.key IN (:...roles) OR perm.slug = :bypass)', {
+        roles,
+        bypass: SITES_BYPASS_SCOPE,
+      });
+    } else {
+      qb.andWhere('role.key IN (:...roles)', { roles });
+    }
+
+    if (options.siteId) {
+      qb.andWhere('(perm.slug = :bypass OR site.id = :siteId)', {
+        bypass: SITES_BYPASS_SCOPE,
+        siteId: options.siteId,
+      });
+    } else if (options.siteName) {
       qb.andWhere(
-        '(role.key = :adminRole OR LOWER(site.name) = LOWER(:siteName))',
-        {
-          adminRole: ROLE_ADMIN,
-          siteName: options.siteName,
-        },
+        '(perm.slug = :bypass OR LOWER(site.name) = LOWER(:siteName))',
+        { bypass: SITES_BYPASS_SCOPE, siteName: options.siteName },
       );
     }
 
@@ -44,8 +57,9 @@ export class NotificationAudienceService {
     return this.users
       .createQueryBuilder('u')
       .innerJoin('u.role', 'role')
+      .innerJoin('role.permissions', 'permission')
       .where('u.isActive = true')
-      .andWhere('role.key = :adminKey', { adminKey: ROLE_ADMIN })
+      .andWhere('permission.slug = :slug', { slug: SITES_BYPASS_SCOPE })
       .getMany();
   }
 

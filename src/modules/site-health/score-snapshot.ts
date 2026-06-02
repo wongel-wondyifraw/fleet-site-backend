@@ -57,13 +57,13 @@ export function scoreSnapshot(
   const siteId = raw.siteId;
   const weights = config.weights;
 
-  const siteVehicles = raw.vehicles.filter((v) => v.assignedSite === siteId);
+  const siteVehicles = raw.vehicles.filter((v) => v.siteId === siteId);
   const totalTrucks = siteVehicles.length;
   const onsiteTrucks = siteVehicles.filter((v) =>
     isOnsiteVehicle(v.status as VehicleStatus),
   ).length;
 
-  const siteTrips = raw.trips.filter((t) => t.vehicleAssignedSite === siteId);
+  const siteTrips = raw.trips.filter((t) => t.vehicleSiteId === siteId);
   const completedTrips = siteTrips.filter(
     (t) => t.status === TripStatus.COMPLETED,
   ).length;

@@ -1,13 +1,9 @@
-import {
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 
-import { ROLE_ADMIN } from '../access/role-keys';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
 import { AttendanceService } from '../attendance/attendance.service';
 import { AttendanceRulesService } from '../attendance-rules/attendance-rules.service';
 import { FuelConsumptionService } from '../fuel/fuel-consumption.service';
@@ -44,6 +40,7 @@ export class SiteHealthService {
     private readonly timeSettings: TimeSettingsService,
     private readonly scoring: SiteScoringService,
     private readonly events: EventEmitter2,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
   async getTodayKey(): Promise<string> {
@@ -68,14 +65,15 @@ export class SiteHealthService {
   ): Promise<SiteHealthRawInput> {
     const [attendanceDays, vehicleRows, tripRows, fuelRoster, target] =
       await Promise.all([
-        this.attendance.getRoster({ date, siteId }),
-        this.vehicles.find({ where: { assignedSite: siteId } }),
+        this.attendance.getRosterInternal({ date, siteId }),
+        this.vehicles.find({ where: { siteId } }),
         this.trips
           .createQueryBuilder('trip')
           .leftJoinAndSelect('trip.vehicle', 'vehicle')
           .where(`${EFFECTIVE_DATE_SQL} = :date`, { tz, date })
+          .andWhere('vehicle.siteId = :siteId', { siteId })
           .getMany(),
-        this.fuelConsumption.getRoster({ date, siteId }),
+        this.fuelConsumption.getRosterInternal({ date, siteId }),
         this.tripTargets.getEffective(date),
       ]);
 
@@ -94,12 +92,12 @@ export class SiteHealthService {
       })),
       vehicles: vehicleRows.map((v) => ({
         status: v.status,
-        assignedSite: v.assignedSite ?? null,
+        siteId: v.siteId ?? null,
       })),
       trips: tripRows.map((t) => ({
         status: t.status,
         distanceKm: t.distanceKm ?? null,
-        vehicleAssignedSite: t.vehicle?.assignedSite ?? null,
+        vehicleSiteId: t.vehicle?.siteId ?? null,
       })),
       fuelRows: fuelRoster.map((row) => ({
         estimatedLiters: row.estimatedLiters ?? null,
@@ -145,6 +143,7 @@ export class SiteHealthService {
         message: `Site ${saved.site?.name ?? saved.siteId} dropped to CRITICAL on ${saved.date}.`,
         href: '/sites',
         siteName: saved.site?.name ?? null,
+        siteId: saved.siteId,
         targetRoles: ['SITE_MANAGER'],
         dedupeKey: `site_health.critical:${saved.siteId}:${saved.date}`,
         payload: {
@@ -205,25 +204,13 @@ export class SiteHealthService {
   }
 
   assertSiteAccess(user: User, siteIds: string[]): string[] {
-    if (user.role?.key === ROLE_ADMIN) return siteIds;
-    const allowed = new Set((user.sites ?? []).map((s) => s.id));
-    const filtered = siteIds.filter((id) => allowed.has(id));
-    if (filtered.length !== siteIds.length) {
-      throw new ForbiddenException('You do not have access to one or more sites.');
-    }
-    return filtered;
+    return this.siteScope.assertAccess(user, siteIds);
   }
 
-  resolveSiteIdsForUser(
-    user: User,
-    requested?: string[],
-  ): string[] {
-    if (user.role?.key === ROLE_ADMIN) {
-      return requested ?? [];
-    }
-    const allowed = (user.sites ?? []).map((s) => s.id);
-    if (!requested || requested.length === 0) return allowed;
-    return this.assertSiteAccess(user, requested);
+  resolveSiteIdsForUser(user: User, requested?: string[]): string[] {
+    const resolved = this.siteScope.resolveFilterSiteIds(user, requested);
+    if (resolved === null) return requested ?? [];
+    return resolved;
   }
 
   toApiDto(snapshot: SiteHealthSnapshot) {

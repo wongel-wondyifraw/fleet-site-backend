@@ -4,6 +4,7 @@ import { In, Repository } from 'typeorm';
 
 import { CalculatedService } from '../../common/calculated.service';
 import { AttendancePunchType } from '../../common/enums';
+import { User } from '../users/user.entity';
 import { AttendanceDay } from '../attendance/attendance-day.entity';
 import { AttendancePunch } from '../attendance/attendance-punch.entity';
 import { AttendanceService } from '../attendance/attendance.service';
@@ -33,9 +34,22 @@ export class FuelConsumptionService {
   ) {}
 
   async getRoster(
+    user: User,
     query: FuelConsumptionRosterQueryDto,
   ): Promise<FuelConsumptionDayDto[]> {
-    const days = await this.attendance.getRoster({
+    const days = await this.attendance.getRoster(user, {
+      date: query.date,
+      siteId: query.siteId,
+      search: query.search,
+    });
+    return days.map((day) => this.mapDay(day));
+  }
+
+  /** Site-health cron — no user scope check. */
+  async getRosterInternal(
+    query: FuelConsumptionRosterQueryDto,
+  ): Promise<FuelConsumptionDayDto[]> {
+    const days = await this.attendance.getRosterInternal({
       date: query.date,
       siteId: query.siteId,
       search: query.search,
@@ -44,9 +58,10 @@ export class FuelConsumptionService {
   }
 
   async getRosterBulk(
+    user: User,
     query: FuelConsumptionRosterBulkQueryDto,
   ): Promise<{ bySite: Record<string, FuelConsumptionDayDto[]> }> {
-    const bulk = await this.attendance.getRosterBulk({
+    const bulk = await this.attendance.getRosterBulk(user, {
       date: query.date,
       siteIds: query.siteIds,
       search: query.search,
@@ -59,10 +74,12 @@ export class FuelConsumptionService {
   }
 
   async getDriverHistory(
+    user: User,
     driverId: string,
     query: FuelConsumptionDriverHistoryQueryDto,
   ): Promise<{ driver: Driver | null; days: FuelConsumptionDayDto[] }> {
     const { driver, days } = await this.attendance.getDriverFuelDays(
+      user,
       driverId,
       query,
     );

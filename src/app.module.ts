@@ -11,9 +11,11 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 
 import { runAccessBackfill } from './modules/access/access.backfill';
+import { runSiteScopeBackfill } from './modules/access/site-scope.backfill';
 
 // Shared utilities (CalculatedService, etc.).
 import { CommonModule } from './common/common.module';
+import { SiteScopeModule } from './common/site-scope/site-scope.module';
 // Attendance feature module and entities (legacy Attendance row + new
 // event-log AttendanceDay/AttendancePunch pair, plus the OdometerReading
 // row captured at each clock event for the fuel module to consume).
@@ -90,6 +92,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
         });
         await ds.initialize();
         await runAccessBackfill(ds);
+        await runSiteScopeBackfill(ds);
         if (wantsSync) {
           await ds.synchronize();
         }
@@ -156,6 +159,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
       },
     }),
     CommonModule,
+    SiteScopeModule,
     AccessModule,
     // Auth must be imported so /api/auth routes and JwtStrategy are registered.
     AuthModule,

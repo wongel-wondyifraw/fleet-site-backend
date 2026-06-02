@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { DriverModule } from '../drivers/driver.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SiteModule } from '../sites/site.module';
 import { TripTargetModule } from '../trip-targets/trip-target.module';
 import { VehicleModule } from '../vehicles/vehicle.module';
 import { TripController } from './trip.controller';
@@ -16,6 +17,7 @@ import { TripService } from './trip.service';
     DriverModule,
     NotificationsModule,
     TripTargetModule,
+    SiteModule,
   ],
   controllers: [TripController],
   providers: [TripService],

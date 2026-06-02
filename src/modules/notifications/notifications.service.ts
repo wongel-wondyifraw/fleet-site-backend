@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Subject, Observable, interval, map } from 'rxjs';
+import { Brackets } from 'typeorm';
 import {
   buildNextCursor,
   PageResponse,
@@ -28,6 +29,8 @@ import {
   UpdateNotificationPreferencesDto,
 } from './notifications.dto';
 import { Repository } from 'typeorm';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
+import { User } from '../users/user.entity';
 import { WebPushService } from './web-push.service';
 
 interface UserStreamState {
@@ -37,6 +40,7 @@ interface UserStreamState {
 
 export interface CreateNotificationInput {
   userId: string;
+  siteId?: string | null;
   kind: NotificationKind;
   severity: NotificationSeverity;
   title: string;
@@ -63,19 +67,56 @@ export class NotificationsService {
     private readonly subscriptions: Repository<PushSubscription>,
     @InjectRepository(NotificationPreference)
     private readonly preferences: Repository<NotificationPreference>,
+    @InjectRepository(User)
+    private readonly users: Repository<User>,
     private readonly webPush: WebPushService,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
+  private async userForScope(userId: string): Promise<User> {
+    const user = await this.users.findOne({
+      where: { id: userId },
+      relations: { sites: true, role: { permissions: true } },
+    });
+    if (!user) {
+      throw new NotFoundException(`User ${userId} not found`);
+    }
+    return user;
+  }
+
+  private applySiteScopeFilter(
+    qb: ReturnType<Repository<Notification>['createQueryBuilder']>,
+    user: User,
+    alias = 'n',
+  ): void {
+    const allowed = this.siteScope.allowedSiteIds(user);
+    if (allowed === null) return;
+    if (allowed.length === 0) {
+      qb.andWhere(`${alias}.siteId IS NULL`);
+      return;
+    }
+    qb.andWhere(
+      new Brackets((sub) => {
+        sub
+          .where(`${alias}.siteId IS NULL`)
+          .orWhere(`${alias}.siteId IN (:...allowedSiteIds)`, {
+            allowedSiteIds: allowed,
+          });
+      }),
+    );
+  }
+
   async listForUser(
-    userId: string,
+    user: User,
     query: NotificationQueryDto,
   ): Promise<PageResponse<NotificationApiItem>> {
     const limit = resolveLimit(query.limit);
     const cursor = parseCursor(query.cursor);
     const qb = this.notifications
       .createQueryBuilder('n')
-      .where('n.userId = :userId', { userId })
+      .where('n.userId = :userId', { userId: user.id })
       .andWhere('n.dismissedAt IS NULL');
+    this.applySiteScopeFilter(qb, user);
 
     if (query.unread === true) qb.andWhere('n.readAt IS NULL');
     if (query.unread === false) qb.andWhere('n.readAt IS NOT NULL');
@@ -98,13 +139,18 @@ export class NotificationsService {
     };
   }
 
-  async getUnreadCount(userId: string): Promise<number> {
-    return this.notifications
+  async getUnreadCount(user: User): Promise<number> {
+    const qb = this.notifications
       .createQueryBuilder('n')
-      .where('n.userId = :userId', { userId })
+      .where('n.userId = :userId', { userId: user.id })
       .andWhere('n.readAt IS NULL')
-      .andWhere('n.dismissedAt IS NULL')
-      .getCount();
+      .andWhere('n.dismissedAt IS NULL');
+    this.applySiteScopeFilter(qb, user);
+    return qb.getCount();
+  }
+
+  private async getUnreadCountByUserId(userId: string): Promise<number> {
+    return this.getUnreadCount(await this.userForScope(userId));
   }
 
   async markRead(userId: string, id: string, read: boolean): Promise<NotificationApiItem> {
@@ -144,7 +190,7 @@ export class NotificationsService {
     if (!result.affected) throw new NotFoundException(`Notification ${id} not found`);
     this.emit(userId, {
       type: 'notification.updated',
-      unreadCount: await this.getUnreadCount(userId),
+      unreadCount: await this.getUnreadCountByUserId(userId),
     });
   }
 
@@ -196,6 +242,7 @@ export class NotificationsService {
     this.guardCreationRate(input.userId);
     const entity = this.notifications.create({
       userId: input.userId,
+      siteId: input.siteId ?? null,
       kind: input.kind,
       severity: input.severity,
       title: input.title,
@@ -221,7 +268,7 @@ export class NotificationsService {
     }
 
     const item = this.toApiItem(saved);
-    const unreadCount = await this.getUnreadCount(input.userId);
+    const unreadCount = await this.getUnreadCountByUserId(input.userId);
     this.emit(input.userId, { type: 'notification.created', item, unreadCount });
     this.sendPushToUser(input.userId, item).catch((err: unknown) => {
       this.logger.warn(
@@ -353,7 +400,7 @@ export class NotificationsService {
     this.emit(userId, {
       type: 'notification.updated',
       item: this.toApiItem(row),
-      unreadCount: await this.getUnreadCount(userId),
+      unreadCount: await this.getUnreadCountByUserId(userId),
     });
   }
 

@@ -53,8 +53,8 @@ export class CreateDriverDto {
   assignedVehicleId?: string;
 
   @IsOptional()
-  @IsString()
-  homeSite?: string;
+  @IsUUID()
+  siteId?: string;
 
   @IsOptional()
   @IsString()
@@ -99,8 +99,8 @@ export class UpdateDriverDto {
   assignedVehicleId?: string | null;
 
   @IsOptional()
-  @IsString()
-  homeSite?: string | null;
+  @IsUUID()
+  siteId?: string | null;
 
   @IsOptional()
   @IsString()
@@ -122,8 +122,8 @@ export class DriverQueryDto extends PaginationDto {
   licenseClass?: LicenseClass;
 
   @IsOptional()
-  @IsString()
-  site?: string;
+  @IsUUID()
+  siteId?: string;
 
   @IsOptional()
   @IsString()

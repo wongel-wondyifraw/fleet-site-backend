@@ -35,12 +35,12 @@ export class NotificationsController {
 
   @Get()
   list(@CurrentUser() user: User, @Query() query: NotificationQueryDto) {
-    return this.notifications.listForUser(user.id, query);
+    return this.notifications.listForUser(user, query);
   }
 
   @Get('unread-count')
   async unreadCount(@CurrentUser() user: User) {
-    return { unreadCount: await this.notifications.getUnreadCount(user.id) };
+    return { unreadCount: await this.notifications.getUnreadCount(user) };
   }
 
   @Patch(':id/read')

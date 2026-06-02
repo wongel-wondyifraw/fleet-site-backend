@@ -15,14 +15,17 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
 import { DriverStatus, LicenseClass } from '../../common/enums';
 import { ROLE_SITE_MANAGER } from '../access/role-keys';
+import { User } from '../users/user.entity';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
   NOTIFICATION_EVENT,
   NotificationDomainEvent,
 } from '../notifications/notification-events';
 import { SiteService } from '../sites/site.service';
+import { Vehicle } from '../vehicles/vehicle.entity';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   AssignVehicleDto,
@@ -37,9 +40,12 @@ export class DriverService implements OnModuleInit {
   constructor(
     @InjectRepository(Driver)
     private readonly repo: Repository<Driver>,
+    @InjectRepository(Vehicle)
+    private readonly vehicleRepo: Repository<Vehicle>,
     private readonly vehicles: VehicleService,
     private readonly sites: SiteService,
     private readonly events: EventEmitter2,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -47,13 +53,25 @@ export class DriverService implements OnModuleInit {
     await this.backfillLegacyLicenseClasses();
   }
 
-  async findAll(query: DriverQueryDto = {}): Promise<PageResponse<Driver>> {
+  async findAll(
+    user: User,
+    query: DriverQueryDto = {},
+  ): Promise<PageResponse<Driver>> {
     const limit = resolveLimit(query.limit);
     const cursor = parseCursor(query.cursor);
 
     const qb = this.repo
       .createQueryBuilder('driver')
       .leftJoinAndSelect('driver.assignedVehicle', 'assignedVehicle');
+
+    if (query.siteId) {
+      this.siteScope.assertAccess(user, [query.siteId]);
+      qb.andWhere('driver.siteId = :siteId', { siteId: query.siteId });
+    }
+    this.siteScope.applyTo(qb, user, {
+      alias: 'driver',
+      allowNull: true,
+    });
 
     if (query.status) {
       qb.andWhere('driver.status = :status', { status: query.status });
@@ -62,9 +80,6 @@ export class DriverService implements OnModuleInit {
       qb.andWhere('driver.licenseClass = :licenseClass', {
         licenseClass: query.licenseClass,
       });
-    }
-    if (query.site) {
-      qb.andWhere('driver.homeSite = :site', { site: query.site });
     }
     if (query.search) {
       const needle = `%${query.search}%`;
@@ -90,7 +105,7 @@ export class DriverService implements OnModuleInit {
     };
   }
 
-  async findAllLookup(): Promise<
+  async findAllLookup(user: User): Promise<
     Pick<
       Driver,
       | 'id'
@@ -99,24 +114,30 @@ export class DriverService implements OnModuleInit {
       | 'employeeId'
       | 'assignedVehicleId'
       | 'status'
-      | 'homeSite'
+      | 'siteId'
     >[]
   > {
-    return this.repo.find({
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        employeeId: true,
-        assignedVehicleId: true,
-        status: true,
-        homeSite: true,
-      },
-      order: { lastName: 'ASC', firstName: 'ASC' },
+    const qb = this.repo
+      .createQueryBuilder('driver')
+      .select([
+        'driver.id',
+        'driver.firstName',
+        'driver.lastName',
+        'driver.employeeId',
+        'driver.assignedVehicleId',
+        'driver.status',
+        'driver.siteId',
+      ])
+      .orderBy('driver.lastName', 'ASC')
+      .addOrderBy('driver.firstName', 'ASC');
+    this.siteScope.applyTo(qb, user, {
+      alias: 'driver',
+      allowNull: true,
     });
+    return qb.getMany();
   }
 
-  async findOne(id: string): Promise<Driver> {
+  async findOne(user: User, id: string): Promise<Driver> {
     const driver = await this.repo.findOne({
       where: { id },
       relations: { assignedVehicle: true },
@@ -124,10 +145,11 @@ export class DriverService implements OnModuleInit {
     if (!driver) {
       throw new NotFoundException(`Driver ${id} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, driver.siteId ?? null);
     return driver;
   }
 
-  async findByEmployeeId(employeeId: string): Promise<Driver> {
+  async findByEmployeeId(user: User, employeeId: string): Promise<Driver> {
     const driver = await this.repo.findOne({
       where: { employeeId },
       relations: { assignedVehicle: true },
@@ -137,23 +159,35 @@ export class DriverService implements OnModuleInit {
         `Driver with employee id ${employeeId} not found`,
       );
     }
+    this.siteScope.assertCanAccessSite(user, driver.siteId ?? null);
     return driver;
   }
 
-  async findWithExpiringLicense(withinDays = 30): Promise<Driver[]> {
+  async findWithExpiringLicense(
+    user: User,
+    withinDays = 30,
+  ): Promise<Driver[]> {
     const threshold = new Date();
     threshold.setDate(threshold.getDate() + withinDays);
-    return this.repo.find({
-      where: { licenseExpiry: LessThanOrEqual(threshold) },
-      order: { licenseExpiry: 'ASC' },
+    const qb = this.repo
+      .createQueryBuilder('driver')
+      .where('driver.licenseExpiry <= :threshold', { threshold })
+      .orderBy('driver.licenseExpiry', 'ASC');
+    this.siteScope.applyTo(qb, user, {
+      alias: 'driver',
+      allowNull: true,
     });
+    return qb.getMany();
   }
 
-  async create(dto: CreateDriverDto): Promise<Driver> {
+  async create(user: User, dto: CreateDriverDto): Promise<Driver> {
     await this.ensureUnique(undefined, dto.licenseNumber);
 
     if (dto.assignedVehicleId) {
-      await this.vehicles.findOne(dto.assignedVehicleId);
+      await this.vehicles.findOne(user, dto.assignedVehicleId);
+    }
+    if (dto.siteId) {
+      this.siteScope.assertCanAccessSite(user, dto.siteId);
     }
 
     // Employee IDs are server-issued (EMP-001, EMP-002, ...) so the UI
@@ -167,9 +201,12 @@ export class DriverService implements OnModuleInit {
       hireDate: new Date(dto.hireDate),
       status: DriverStatus.ACTIVE,
       assignedVehicleId: dto.assignedVehicleId ?? null,
-      homeSite: await this.homeSiteFromVehicleId(dto.assignedVehicleId ?? null),
+      siteId:
+        dto.siteId ??
+        (await this.siteIdFromVehicleId(dto.assignedVehicleId ?? null)),
     });
     const saved = await this.repo.save(driver);
+    const siteName = await this.siteNameForId(saved.siteId);
     const event: NotificationDomainEvent = {
       eventName: 'driver.onboarded',
       kind: NotificationKind.DRIVER,
@@ -177,20 +214,21 @@ export class DriverService implements OnModuleInit {
       title: 'New driver onboarded',
       message: `${saved.firstName} ${saved.lastName} joined the driver roster.`,
       href: '/drivers',
-      siteName: saved.homeSite ?? null,
+      siteName,
+      siteId: saved.siteId ?? null,
       targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `driver.onboarded:${saved.id}`,
       payload: { driverId: saved.id },
     };
     this.events.emit(NOTIFICATION_EVENT, event);
     if (saved.assignedVehicleId) {
-      await this.emitVehicleAssignment(saved, saved.assignedVehicleId);
+      await this.emitVehicleAssignment(user, saved, saved.assignedVehicleId);
     }
     return saved;
   }
 
-  async update(id: string, dto: UpdateDriverDto): Promise<Driver> {
-    const driver = await this.findOne(id);
+  async update(user: User, id: string, dto: UpdateDriverDto): Promise<Driver> {
+    const driver = await this.findOne(user, id);
     const previousVehicleId = driver.assignedVehicleId ?? null;
 
     if (dto.licenseNumber && dto.licenseNumber !== driver.licenseNumber) {
@@ -198,20 +236,22 @@ export class DriverService implements OnModuleInit {
     }
 
     if (dto.assignedVehicleId) {
-      await this.vehicles.findOne(dto.assignedVehicleId);
+      await this.vehicles.findOne(user, dto.assignedVehicleId);
+    }
+    if (dto.siteId) {
+      this.siteScope.assertCanAccessSite(user, dto.siteId);
     }
 
-    const { homeSite: _ignoredHomeSite, ...rest } = dto;
     Object.assign(driver, {
-      ...rest,
+      ...dto,
       licenseExpiry: dto.licenseExpiry
         ? new Date(dto.licenseExpiry)
         : driver.licenseExpiry,
     });
     if (dto.assignedVehicleId !== undefined) {
-      driver.homeSite = await this.homeSiteFromVehicleId(
-        dto.assignedVehicleId,
-      );
+      driver.siteId = await this.siteIdFromVehicleId(dto.assignedVehicleId);
+    } else if (dto.siteId !== undefined) {
+      driver.siteId = dto.siteId;
     }
     const saved = await this.repo.save(driver);
     if (
@@ -219,36 +259,45 @@ export class DriverService implements OnModuleInit {
       dto.assignedVehicleId &&
       dto.assignedVehicleId !== previousVehicleId
     ) {
-      await this.emitVehicleAssignment(saved, dto.assignedVehicleId);
+      await this.emitVehicleAssignment(user, saved, dto.assignedVehicleId);
     }
     return saved;
   }
 
-  async assignVehicle(id: string, dto: AssignVehicleDto): Promise<Driver> {
-    const driver = await this.findOne(id);
+  async assignVehicle(
+    user: User,
+    id: string,
+    dto: AssignVehicleDto,
+  ): Promise<Driver> {
+    const driver = await this.findOne(user, id);
     if (driver.status !== DriverStatus.ACTIVE) {
       throw new BadRequestException(
         `Cannot assign vehicle to a driver with status ${driver.status}`,
       );
     }
-    await this.vehicles.findOne(dto.vehicleId);
+    await this.vehicles.findOne(user, dto.vehicleId);
     const previousVehicleId = driver.assignedVehicleId ?? null;
     driver.assignedVehicleId = dto.vehicleId;
+    driver.siteId = await this.siteIdFromVehicleId(dto.vehicleId);
     const saved = await this.repo.save(driver);
     if (dto.vehicleId !== previousVehicleId) {
-      await this.emitVehicleAssignment(saved, dto.vehicleId);
+      await this.emitVehicleAssignment(user, saved, dto.vehicleId);
     }
     return saved;
   }
 
-  async unassignVehicle(id: string): Promise<Driver> {
-    const driver = await this.findOne(id);
+  async unassignVehicle(user: User, id: string): Promise<Driver> {
+    const driver = await this.findOne(user, id);
     driver.assignedVehicleId = null;
     return this.repo.save(driver);
   }
 
-  async setStatus(id: string, status: DriverStatus): Promise<Driver> {
-    const driver = await this.findOne(id);
+  async setStatus(
+    user: User,
+    id: string,
+    status: DriverStatus,
+  ): Promise<Driver> {
+    const driver = await this.findOne(user, id);
     driver.status = status;
     if (status !== DriverStatus.ACTIVE) {
       driver.assignedVehicleId = null;
@@ -256,7 +305,8 @@ export class DriverService implements OnModuleInit {
     return this.repo.save(driver);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(user: User, id: string): Promise<void> {
+    await this.findOne(user, id);
     const result = await this.repo.delete(id);
     if (!result.affected) {
       throw new NotFoundException(`Driver ${id} not found`);
@@ -267,15 +317,16 @@ export class DriverService implements OnModuleInit {
   // assigned to a vehicle. Dedupe key embeds both ids so re-assigning the
   // same driver/vehicle pair is idempotent within a notification cycle.
   private async emitVehicleAssignment(
+    user: User,
     driver: Driver,
     vehicleId: string,
   ): Promise<void> {
     let vehicleLabel = vehicleId;
-    let siteName: string | null = driver.homeSite ?? null;
+    const siteId = driver.siteId ?? null;
+    const siteName = await this.siteNameForId(siteId);
     try {
-      const vehicle = await this.vehicles.findOne(vehicleId);
+      const vehicle = await this.vehicles.findOne(user, vehicleId);
       vehicleLabel = vehicle.assetNumber ?? vehicle.plateNumber ?? vehicleId;
-      siteName = vehicle.assignedSite ?? siteName;
     } catch {
       // Vehicle lookup is best-effort here; the assignment itself already
       // succeeded so we still want to fire the notification.
@@ -289,6 +340,7 @@ export class DriverService implements OnModuleInit {
       message: `${driver.firstName} ${driver.lastName} is now driving ${vehicleLabel}.`,
       href: '/drivers',
       siteName,
+      siteId,
       targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `driver.assigned_to_vehicle:${driver.id}:${vehicleId}`,
       payload: { driverId: driver.id, vehicleId },
@@ -296,15 +348,27 @@ export class DriverService implements OnModuleInit {
     this.events.emit(NOTIFICATION_EVENT, event);
   }
 
-  /** Driver site is derived from the assigned vehicle's site (by name). */
-  private async homeSiteFromVehicleId(
+  private async siteNameForId(
+    siteId: string | null | undefined,
+  ): Promise<string | null> {
+    if (!siteId) return null;
+    try {
+      return (await this.sites.findOne(siteId)).name;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Driver site is derived from the assigned vehicle's site. */
+  private async siteIdFromVehicleId(
     vehicleId: string | null,
   ): Promise<string | null> {
     if (!vehicleId) return null;
-    const vehicle = await this.vehicles.findOne(vehicleId);
-    if (!vehicle.assignedSite) return null;
-    const site = await this.sites.findOne(vehicle.assignedSite);
-    return site.name;
+    const vehicle = await this.vehicleRepo.findOne({
+      where: { id: vehicleId },
+      select: { id: true, siteId: true },
+    });
+    return vehicle?.siteId ?? null;
   }
 
   private async ensureUnique(

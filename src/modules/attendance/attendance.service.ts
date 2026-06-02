@@ -15,6 +15,8 @@ import {
 } from 'typeorm';
 
 import { CalculatedService } from '../../common/calculated.service';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
+import { User } from '../users/user.entity';
 import {
   AttendanceDayStatus,
   AttendancePunchType,
@@ -83,6 +85,7 @@ export class AttendanceService {
     private readonly calculated: CalculatedService,
     private readonly attendanceRules: AttendanceRulesService,
     private readonly events: EventEmitter2,
+    private readonly siteScope: SiteScopeService,
   ) {}
 
   // Drivers expected to have a DAY_IN by `cutoffTimeHHmm` on `date` but who
@@ -224,7 +227,11 @@ export class AttendanceService {
 
   // Returns every expected driver on a site for a given date. Missing day
   // rows are created lazily so the caller never has to seed them manually.
-  async getRoster(query: AttendanceRosterQueryDto): Promise<AttendanceDay[]> {
+  async getRoster(
+    user: User,
+    query: AttendanceRosterQueryDto,
+  ): Promise<AttendanceDay[]> {
+    this.siteScope.assertAccess(user, [query.siteId]);
     const site = await this.sites.findOne({ where: { id: query.siteId } });
     if (!site) {
       throw new NotFoundException(`Site ${query.siteId} not found`);
@@ -233,7 +240,26 @@ export class AttendanceService {
     const rosterDrivers = await this.drivers.find({
       where: {
         status: DriverStatus.ACTIVE,
-        homeSite: site.name,
+        siteId: query.siteId,
+      },
+    });
+
+    return this.buildRosterForSite(site, rosterDrivers, query);
+  }
+
+  /** Site-health / cron — no user scope check; caller must pin siteId. */
+  async getRosterInternal(
+    query: AttendanceRosterQueryDto,
+  ): Promise<AttendanceDay[]> {
+    const site = await this.sites.findOne({ where: { id: query.siteId } });
+    if (!site) {
+      throw new NotFoundException(`Site ${query.siteId} not found`);
+    }
+
+    const rosterDrivers = await this.drivers.find({
+      where: {
+        status: DriverStatus.ACTIVE,
+        siteId: query.siteId,
       },
     });
 
@@ -242,39 +268,45 @@ export class AttendanceService {
 
   /** Loads roster rows for multiple sites in one request (one HTTP round-trip). */
   async getRosterBulk(
+    user: User,
     query: AttendanceRosterBulkQueryDto,
   ): Promise<{ bySite: Record<string, AttendanceDay[]> }> {
-    const siteIds = query.siteIds
+    const requestedIds = query.siteIds
       .split(',')
       .map((id) => id.trim())
       .filter(Boolean);
-    if (siteIds.length === 0) {
+    if (requestedIds.length === 0) {
       return { bySite: {} };
     }
 
-    const sites = await this.sites.find({ where: { id: In(siteIds) } });
+    const siteIds = this.siteScope.resolveFilterSiteIds(user, requestedIds);
+    if (siteIds !== null && siteIds.length === 0) {
+      return { bySite: {} };
+    }
+    const effectiveIds = siteIds ?? requestedIds;
+
+    const sites = await this.sites.find({ where: { id: In(effectiveIds) } });
     const siteById = new Map(sites.map((site) => [site.id, site]));
     const activeDrivers = await this.drivers.find({
-      where: { status: DriverStatus.ACTIVE },
+      where: { status: DriverStatus.ACTIVE, siteId: In(effectiveIds) },
     });
-    const driversByHomeSite = new Map<string, Driver[]>();
+    const driversBySiteId = new Map<string, Driver[]>();
     for (const driver of activeDrivers) {
-      const homeSite = driver.homeSite?.trim();
-      if (!homeSite) continue;
-      const bucket = driversByHomeSite.get(homeSite) ?? [];
+      if (!driver.siteId) continue;
+      const bucket = driversBySiteId.get(driver.siteId) ?? [];
       bucket.push(driver);
-      driversByHomeSite.set(homeSite, bucket);
+      driversBySiteId.set(driver.siteId, bucket);
     }
 
     const bySite: Record<string, AttendanceDay[]> = {};
     await Promise.all(
-      siteIds.map(async (siteId) => {
+      effectiveIds.map(async (siteId) => {
         const site = siteById.get(siteId);
         if (!site) {
           bySite[siteId] = [];
           return;
         }
-        const rosterDrivers = driversByHomeSite.get(site.name) ?? [];
+        const rosterDrivers = driversBySiteId.get(siteId) ?? [];
         bySite[siteId] = await this.buildRosterForSite(site, rosterDrivers, {
           date: query.date,
           siteId,
@@ -292,6 +324,7 @@ export class AttendanceService {
    * `workDistanceKm` and odometer summaries loaded separately.
    */
   async getDriverFuelDays(
+    user: User,
     driverId: string,
     query: AttendanceDriverHistoryQueryDto,
   ): Promise<{ driver: Driver | null; days: AttendanceDay[] }> {
@@ -311,15 +344,17 @@ export class AttendanceService {
     if (!driver) {
       throw new NotFoundException(`Driver ${driverId} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, driver.siteId ?? null);
 
-    const days = await this.days
+    const dayQb = this.days
       .createQueryBuilder('day')
       .leftJoinAndSelect('day.site', 'site')
       .where('day.driverId = :driverId', { driverId })
       .andWhere('day.date >= :from', { from: query.from })
       .andWhere('day.date <= :to', { to: query.to })
-      .orderBy('day.date', 'ASC')
-      .getMany();
+      .orderBy('day.date', 'ASC');
+    this.siteScope.applyTo(dayQb, user, { alias: 'day' });
+    const days = await dayQb.getMany();
 
     return { driver, days };
   }
@@ -388,6 +423,7 @@ export class AttendanceService {
   // get auto-closed (DAY_OUT / LUNCH_IN synthesised at end-of-day) and
   // their status / workDistanceKm are refreshed in the same response.
   async getDriverHistory(
+    user: User,
     driverId: string,
     query: AttendanceDriverHistoryQueryDto,
   ): Promise<{ driver: Driver | null; days: AttendanceDay[] }> {
@@ -407,10 +443,11 @@ export class AttendanceService {
     if (!driver) {
       throw new NotFoundException(`Driver ${driverId} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, driver.siteId ?? null);
 
     // We sort punches inside each day on the query so the frontend can
     // walk them in chronological order without re-sorting.
-    let days = await this.days
+    const dayQb = this.days
       .createQueryBuilder('day')
       .leftJoinAndSelect('day.punches', 'punch')
       .leftJoinAndSelect('day.site', 'site')
@@ -418,8 +455,9 @@ export class AttendanceService {
       .andWhere('day.date >= :from', { from: query.from })
       .andWhere('day.date <= :to', { to: query.to })
       .orderBy('day.date', 'ASC')
-      .addOrderBy('punch.at', 'ASC')
-      .getMany();
+      .addOrderBy('punch.at', 'ASC');
+    this.siteScope.applyTo(dayQb, user, { alias: 'day' });
+    let days = await dayQb.getMany();
 
     days = await this.recalcAndPersistDays(days);
     await this.attachOdometerToDays(days);
@@ -427,10 +465,11 @@ export class AttendanceService {
   }
 
   async createPunch(
+    user: User,
     dayId: string,
     dto: CreateAttendancePunchDto,
   ): Promise<AttendanceDay> {
-    const day = await this.loadDayForWrite(dayId);
+    const day = await this.loadDayForWrite(user, dayId);
     const punchAt = dto.at ? new Date(dto.at) : new Date();
     this.assertPunchAllowed(day.punches ?? [], dto.type);
     this.assertOdometerIfRequired(dto.type, dto.odometer);
@@ -470,10 +509,11 @@ export class AttendanceService {
   }
 
   async updateDayNew(
+    user: User,
     dayId: string,
     dto: UpdateAttendanceDayDtoNew,
   ): Promise<AttendanceDay> {
-    const day = await this.loadDayForWrite(dayId);
+    const day = await this.loadDayForWrite(user, dayId);
 
     if (dto.status !== undefined) {
       if (!USER_SETTABLE_DAY_STATUSES.has(dto.status)) {
@@ -493,6 +533,7 @@ export class AttendanceService {
   }
 
   async updatePunch(
+    user: User,
     punchId: string,
     dto: UpdateAttendancePunchDto,
   ): Promise<AttendanceDay> {
@@ -500,6 +541,7 @@ export class AttendanceService {
     if (!punch) {
       throw new NotFoundException(`Attendance punch ${punchId} not found`);
     }
+    await this.loadDayForWrite(user, punch.dayId);
     if (punch.isVoided) {
       throw new BadRequestException(
         `Punch ${punchId} is voided and cannot be edited.`,
@@ -516,7 +558,7 @@ export class AttendanceService {
 
     const dayForReading =
       dto.odometer !== undefined
-        ? await this.loadDayForWrite(punch.dayId)
+        ? await this.loadDayForWrite(user, punch.dayId)
         : null;
 
     await this.days.manager.transaction(async (manager) => {
@@ -571,11 +613,12 @@ export class AttendanceService {
 
   // Soft delete: mark the punch voided and append an audit note. We never
   // hard-delete so the event log keeps its full history.
-  async voidPunch(punchId: string): Promise<AttendanceDay> {
+  async voidPunch(user: User, punchId: string): Promise<AttendanceDay> {
     const punch = await this.punches.findOne({ where: { id: punchId } });
     if (!punch) {
       throw new NotFoundException(`Attendance punch ${punchId} not found`);
     }
+    await this.loadDayForWrite(user, punch.dayId);
     if (punch.isVoided) {
       return this.recalcSingleDay(punch.dayId);
     }
@@ -645,7 +688,10 @@ export class AttendanceService {
   // by `at` ASC so the validation/derivation helpers can scan them in order.
   // The `driver` relation is included so we can resolve the driver's current
   // vehicle when persisting odometer readings against the new punch.
-  private async loadDayForWrite(dayId: string): Promise<AttendanceDay> {
+  private async loadDayForWrite(
+    user: User,
+    dayId: string,
+  ): Promise<AttendanceDay> {
     const day = await this.days.findOne({
       where: { id: dayId },
       relations: { punches: true, driver: true },
@@ -653,6 +699,7 @@ export class AttendanceService {
     if (!day) {
       throw new NotFoundException(`Attendance day ${dayId} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, day.siteId);
     day.punches = (day.punches ?? []).sort(
       (a, b) => new Date(a.at).getTime() - new Date(b.at).getTime(),
     );

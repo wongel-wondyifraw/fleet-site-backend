@@ -88,11 +88,11 @@ export interface SiteHealthRawInput {
     expected: boolean;
     punches: Array<{ type: string; at: string; isVoided: boolean }>;
   }>;
-  vehicles: Array<{ status: string; assignedSite: string | null }>;
+  vehicles: Array<{ status: string; siteId: string | null }>;
   trips: Array<{
     status: string;
     distanceKm: number | null;
-    vehicleAssignedSite: string | null;
+    vehicleSiteId: string | null;
   }>;
   fuelRows: Array<{
     estimatedLiters: number | null;

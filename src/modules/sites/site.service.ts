@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, In, Repository } from 'typeorm';
 
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
 import { SiteStatus } from '../../common/enums';
 import { User } from '../users/user.entity';
 import { CreateSiteDto, SiteQueryDto, UpdateSiteDto } from './site.dto';
@@ -15,7 +16,21 @@ export class SiteService {
     // Used to validate and resolve assignee IDs into User entities.
     @InjectRepository(User)
     private readonly users: Repository<User>,
+    private readonly siteScope: SiteScopeService,
   ) {}
+
+  /** Sites the caller may access (all sites when bypass permission is granted). */
+  async findForUser(user: User): Promise<Site[]> {
+    const allowed = this.siteScope.allowedSiteIds(user);
+    if (allowed === null) {
+      return this.repo.find({ order: { name: 'ASC' } });
+    }
+    if (allowed.length === 0) return [];
+    return this.repo.find({
+      where: { id: In(allowed) },
+      order: { name: 'ASC' },
+    });
+  }
 
   async findAll(query: SiteQueryDto = {}): Promise<Site[]> {
     const baseWhere: FindOptionsWhere<Site> = {};

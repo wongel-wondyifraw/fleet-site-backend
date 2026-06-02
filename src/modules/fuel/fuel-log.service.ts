@@ -14,12 +14,15 @@ import {
   resolveLimit,
 } from '../../common/dto/pagination.dto';
 import { CalculatedService } from '../../common/calculated.service';
+import { SiteScopeService } from '../../common/site-scope/site-scope.service';
 import { ROLE_SITE_MANAGER } from '../access/role-keys';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
   NOTIFICATION_EVENT,
   NotificationDomainEvent,
 } from '../notifications/notification-events';
+import { SiteService } from '../sites/site.service';
+import { User } from '../users/user.entity';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   CreateFuelLogDto,
@@ -39,9 +42,14 @@ export class FuelLogService {
     private readonly vehicles: VehicleService,
     private readonly calculated: CalculatedService,
     private readonly events: EventEmitter2,
+    private readonly siteScope: SiteScopeService,
+    private readonly sites: SiteService,
   ) {}
 
-  async findAll(query: FuelLogQueryDto = {}): Promise<PageResponse<FuelLog>> {
+  async findAll(
+    user: User,
+    query: FuelLogQueryDto = {},
+  ): Promise<PageResponse<FuelLog>> {
     if (!query.vehicleId && !(query.from && query.to)) {
       throw new BadRequestException(
         'Provide vehicleId or both from and to date filters.',
@@ -50,11 +58,16 @@ export class FuelLogService {
 
     const limit = resolveLimit(query.limit);
     const cursor = parseCursor(query.cursor);
-    const qb = this.repo.createQueryBuilder('log');
+    const qb = this.repo
+      .createQueryBuilder('log')
+      .leftJoinAndSelect('log.vehicle', 'vehicle');
 
     if (query.vehicleId) {
+      await this.vehicles.findOne(user, query.vehicleId);
       qb.andWhere('log.vehicleId = :vehicleId', { vehicleId: query.vehicleId });
     }
+    this.siteScope.applyTo(qb, user, { alias: 'vehicle', allowNull: false });
+
     if (query.driverId) {
       qb.andWhere('log.driverId = :driverId', { driverId: query.driverId });
     }
@@ -84,7 +97,7 @@ export class FuelLogService {
     };
   }
 
-  async findOne(id: string): Promise<FuelLog> {
+  async findOne(user: User, id: string): Promise<FuelLog> {
     const log = await this.repo.findOne({
       where: { id },
       relations: { vehicle: true },
@@ -92,11 +105,12 @@ export class FuelLogService {
     if (!log) {
       throw new NotFoundException(`Fuel log ${id} not found`);
     }
+    this.siteScope.assertCanAccessSite(user, log.vehicle?.siteId ?? null);
     return log;
   }
 
-  async create(dto: CreateFuelLogDto): Promise<FuelLog> {
-    const vehicle = await this.vehicles.findOne(dto.vehicleId);
+  async create(user: User, dto: CreateFuelLogDto): Promise<FuelLog> {
+    const vehicle = await this.vehicles.findOne(user, dto.vehicleId);
     const log = this.repo.create({
       ...dto,
       fillDate: new Date(dto.fillDate),
@@ -104,11 +118,19 @@ export class FuelLogService {
     const saved = await this.repo.save(log);
 
     if (dto.odometerReading > vehicle.currentOdometer) {
-      await this.vehicles.update(vehicle.id, {
+      await this.vehicles.update(user, vehicle.id, {
         currentOdometer: dto.odometerReading,
       });
     }
     if (vehicle.fuelCapacity > 0 && dto.liters > vehicle.fuelCapacity) {
+      let siteName: string | null = null;
+      if (vehicle.siteId) {
+        try {
+          siteName = (await this.sites.findOne(vehicle.siteId)).name;
+        } catch {
+          siteName = null;
+        }
+      }
       const event: NotificationDomainEvent = {
         eventName: 'fuel.variance_flagged',
         kind: NotificationKind.FUEL,
@@ -116,7 +138,8 @@ export class FuelLogService {
         title: 'Fuel variance flagged',
         message: `${vehicle.assetNumber ?? vehicle.plateNumber} logged ${dto.liters}L, above the ${vehicle.fuelCapacity}L configured capacity.`,
         href: '/fuel',
-        siteName: vehicle.assignedSite ?? null,
+        siteName,
+        siteId: vehicle.siteId ?? null,
         targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `fuel.variance:${vehicle.id}:${toDateKey(new Date(dto.fillDate))}`,
         payload: {
@@ -131,8 +154,12 @@ export class FuelLogService {
     return saved;
   }
 
-  async update(id: string, dto: UpdateFuelLogDto): Promise<FuelLog> {
-    const log = await this.findOne(id);
+  async update(
+    user: User,
+    id: string,
+    dto: UpdateFuelLogDto,
+  ): Promise<FuelLog> {
+    const log = await this.findOne(user, id);
     Object.assign(log, {
       ...dto,
       fillDate: dto.fillDate ? new Date(dto.fillDate) : log.fillDate,
@@ -140,7 +167,8 @@ export class FuelLogService {
     return this.repo.save(log);
   }
 
-  async remove(id: string): Promise<void> {
+  async remove(user: User, id: string): Promise<void> {
+    await this.findOne(user, id);
     const result = await this.repo.delete(id);
     if (!result.affected) {
       throw new NotFoundException(`Fuel log ${id} not found`);
@@ -148,75 +176,49 @@ export class FuelLogService {
   }
 
   async efficiencyForVehicle(
+    user: User,
     vehicleId: string,
-    query: FuelEfficiencyQueryDto = {},
-  ): Promise<{
-    vehicleId: string;
-    from: string;
-    to: string;
-    samples: number;
-    latestKmPerLitre: number | null;
-    averageKmPerLitre: number | null;
-    costPerKm: number | null;
-  }> {
-    const { from, to } = resolveEfficiencyWindow(query);
-    const logs = await this.repo
-      .createQueryBuilder('log')
-      .where('log.vehicleId = :vehicleId', { vehicleId })
-      .andWhere('log.fillDate >= :from', { from: new Date(`${from}T00:00:00`) })
-      .andWhere('log.fillDate <= :to', { to: new Date(`${to}T23:59:59.999`) })
-      .orderBy('log.fillDate', 'ASC')
-      .getMany();
-    const windowed = logs;
-
-    const efficiencies: number[] = [];
-    for (let i = 1; i < windowed.length; i++) {
-      const eff = this.calculated.computeFuelEfficiency(
-        windowed[i - 1],
-        windowed[i],
-      );
-      if (eff !== null) efficiencies.push(eff);
+    query: FuelEfficiencyQueryDto,
+  ) {
+    await this.vehicles.findOne(user, vehicleId);
+    const from = query.from
+      ? new Date(query.from)
+      : new Date(
+          Date.now() - EFFICIENCY_DEFAULT_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+        );
+    const to = query.to ? new Date(query.to) : new Date();
+    const logs = await this.repo.find({
+      where: { vehicleId },
+      order: { fillDate: 'ASC' },
+    });
+    const inRange = logs.filter(
+      (l) => l.fillDate >= from && l.fillDate <= to,
+    );
+    const segments: Array<{
+      fromLogId: string;
+      toLogId: string;
+      kmPerLitre: number | null;
+    }> = [];
+    for (let i = 1; i < inRange.length; i++) {
+      segments.push({
+        fromLogId: inRange[i - 1].id,
+        toLogId: inRange[i].id,
+        kmPerLitre: this.calculated.computeFuelEfficiency(
+          inRange[i - 1],
+          inRange[i],
+        ),
+      });
     }
-
-    const average = efficiencies.length
-      ? Number(
-          (
-            efficiencies.reduce((s, v) => s + v, 0) / efficiencies.length
-          ).toFixed(2),
-        )
-      : null;
-
     return {
       vehicleId,
-      from,
-      to,
-      samples: windowed.length,
-      latestKmPerLitre: efficiencies.length
-        ? efficiencies[efficiencies.length - 1]
-        : null,
-      averageKmPerLitre: average,
-      costPerKm: this.calculated.computeCostPerKm(windowed),
+      from: from.toISOString().slice(0, 10),
+      to: to.toISOString().slice(0, 10),
+      costPerKm: this.calculated.computeCostPerKm(inRange),
+      segments,
     };
   }
 }
 
-function resolveEfficiencyWindow(query: FuelEfficiencyQueryDto): {
-  from: string;
-  to: string;
-} {
-  const to = query.to ?? toDateKey(new Date());
-  if (query.from) {
-    return { from: query.from, to };
-  }
-  const end = new Date(`${to}T00:00:00`);
-  const start = new Date(end);
-  start.setDate(start.getDate() - (EFFICIENCY_DEFAULT_WINDOW_DAYS - 1));
-  return { from: toDateKey(start), to };
-}
-
 function toDateKey(d: Date): string {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
+  return d.toISOString().slice(0, 10);
 }

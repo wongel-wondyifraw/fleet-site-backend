@@ -159,16 +159,16 @@ export class ReportsDigestService {
     };
 
     for (const trip of completedTrips) {
-      const siteId = trip.vehicle?.assignedSite ?? null;
+      const siteId = trip.vehicle?.siteId ?? null;
       upsertSite(siteId).tripsCompleted += 1;
     }
     for (const trip of startedTrips) {
       if (trip.status === TripStatus.CANCELLED) continue;
-      const siteId = trip.vehicle?.assignedSite ?? null;
+      const siteId = trip.vehicle?.siteId ?? null;
       upsertSite(siteId).tripsStarted += 1;
     }
     for (const log of fuelLogs) {
-      const siteId = log.vehicle?.assignedSite ?? null;
+      const siteId = log.vehicle?.siteId ?? null;
       const entry = upsertSite(siteId);
       entry.fuelLiters += Number(log.liters) || 0;
       entry.fuelCost += Number(log.cost) || 0;

@@ -10,11 +10,12 @@ import {
 } from 'typeorm';
 
 import { DriverStatus, LicenseClass } from '../../common/enums';
+import { Site } from '../sites/site.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
 
 @Entity({ name: 'drivers' })
 @Index(['lastName', 'firstName'])
-@Index(['status', 'homeSite'])
+@Index(['status', 'siteId'])
 export class Driver {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
@@ -56,8 +57,12 @@ export class Driver {
   @JoinColumn({ name: 'assignedVehicleId' })
   assignedVehicle?: Vehicle | null;
 
-  @Column({ type: 'varchar', nullable: true })
-  homeSite?: string | null;
+  @Column({ type: 'uuid', nullable: true })
+  siteId?: string | null;
+
+  @ManyToOne(() => Site, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'siteId' })
+  site?: Site | null;
 
   @Column({ type: 'text', nullable: true })
   notes?: string | null;

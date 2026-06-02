@@ -13,7 +13,9 @@ import {
 } from '@nestjs/common';
 
 import { SiteStatus } from '../../common/enums';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
+import { User } from '../users/user.entity';
 import { CreateSiteDto, SiteQueryDto, UpdateSiteDto } from './site.dto';
 import { SiteService } from './site.service';
 
@@ -31,6 +33,12 @@ export class SiteController {
   @RequiresPermissions('sites.read')
   findActive() {
     return this.sites.findActive();
+  }
+
+  @Get('me')
+  @RequiresPermissions('sites.read')
+  findMine(@CurrentUser() user: User) {
+    return this.sites.findForUser(user);
   }
 
   @Get(':id')

@@ -11,6 +11,7 @@
   { "slug": "sites.create", "name": "Create sites", "category": "Sites", "description": "Add new sites" },
   { "slug": "sites.update", "name": "Update sites", "category": "Sites", "description": "Edit site details" },
   { "slug": "sites.delete", "name": "Delete sites", "category": "Sites", "description": "Remove sites" },
+  { "slug": "sites.bypass-scope", "name": "Bypass site scope", "category": "Sites", "description": "View and manage data across all sites regardless of site assignment" },
   { "slug": "vehicles.read", "name": "View vehicles", "category": "Vehicles", "description": "List and view vehicles" },
   { "slug": "vehicles.create", "name": "Create vehicles", "category": "Vehicles", "description": "Register new vehicles" },
   { "slug": "vehicles.update", "name": "Update vehicles", "category": "Vehicles", "description": "Edit vehicle records" },

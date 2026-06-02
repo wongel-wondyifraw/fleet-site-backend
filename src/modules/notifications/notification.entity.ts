@@ -35,6 +35,9 @@ export class Notification {
   @Column({ type: 'uuid' })
   userId!: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  siteId?: string | null;
+
   @Column({ type: 'varchar', length: 32 })
   kind!: NotificationKind;
 

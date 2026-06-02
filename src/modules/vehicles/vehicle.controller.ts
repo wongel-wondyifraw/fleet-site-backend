@@ -12,8 +12,10 @@ import {
   Query,
 } from '@nestjs/common';
 
-import { VehicleStatus } from '../../common/enums';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
+import { VehicleStatus } from '../../common/enums';
+import { User } from '../users/user.entity';
 import {
   CreateVehicleDto,
   UpdateVehicleDto,
@@ -27,51 +29,59 @@ export class VehicleController {
 
   @Get()
   @RequiresPermissions('vehicles.read')
-  findAll(@Query() query: VehicleQueryDto) {
-    return this.vehicles.findAll(query);
+  findAll(@CurrentUser() user: User, @Query() query: VehicleQueryDto) {
+    return this.vehicles.findAll(user, query);
   }
 
   @Get('lookup')
   @RequiresPermissions('vehicles.read')
-  lookup() {
-    return this.vehicles.findAllLookup();
+  lookup(@CurrentUser() user: User) {
+    return this.vehicles.findAllLookup(user);
   }
 
   @Get(':id')
   @RequiresPermissions('vehicles.read')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vehicles.findOne(id);
+  findOne(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.vehicles.findOne(user, id);
   }
 
   @Post()
   @RequiresPermissions('vehicles.create')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateVehicleDto) {
-    return this.vehicles.create(dto);
+  create(@CurrentUser() user: User, @Body() dto: CreateVehicleDto) {
+    return this.vehicles.create(user, dto);
   }
 
   @Patch(':id')
   @RequiresPermissions('vehicles.update')
   update(
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateVehicleDto,
   ) {
-    return this.vehicles.update(id, dto);
+    return this.vehicles.update(user, id, dto);
   }
 
   @Patch(':id/status')
   @RequiresPermissions('vehicles.update')
   setStatus(
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body('status') status: VehicleStatus,
   ) {
-    return this.vehicles.setStatus(id, status);
+    return this.vehicles.setStatus(user, id, status);
   }
 
   @Delete(':id')
   @RequiresPermissions('vehicles.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.vehicles.remove(id);
+  remove(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.vehicles.remove(user, id);
   }
 }

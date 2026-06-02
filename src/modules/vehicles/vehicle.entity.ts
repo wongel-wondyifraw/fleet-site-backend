@@ -2,6 +2,8 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
@@ -10,6 +12,7 @@ import {
 import { FuelType, VehicleStatus, VehicleType } from '../../common/enums';
 import { Attendance } from '../attendance/attendance.entity';
 import { FuelLog } from '../fuel/fuel-log.entity';
+import { Site } from '../sites/site.entity';
 
 @Entity({ name: 'vehicles' })
 export class Vehicle {
@@ -45,8 +48,12 @@ export class Vehicle {
   @Column({ type: 'float', default: 0 })
   currentOdometer!: number;
 
-  @Column({ type: 'varchar', nullable: true })
-  assignedSite?: string | null;
+  @Column({ type: 'uuid', nullable: true })
+  siteId?: string | null;
+
+  @ManyToOne(() => Site, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'siteId' })
+  site?: Site | null;
 
   @OneToMany(() => FuelLog, (log) => log.vehicle)
   fuelLogs!: FuelLog[];

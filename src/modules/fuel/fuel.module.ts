@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OdometerReading } from '../attendance/odometer-reading.entity';
+import { SiteModule } from '../sites/site.module';
 import { VehicleModule } from '../vehicles/vehicle.module';
 import { FuelConsumptionController } from './fuel-consumption.controller';
 import { FuelConsumptionService } from './fuel-consumption.service';
@@ -15,6 +16,7 @@ import { FuelLogService } from './fuel-log.service';
   imports: [
     TypeOrmModule.forFeature([FuelLog, OdometerReading]),
     VehicleModule,
+    SiteModule,
     AttendanceModule,
     NotificationsModule,
   ],

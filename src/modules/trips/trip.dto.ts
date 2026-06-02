@@ -182,6 +182,10 @@ export class TripQueryDto extends PaginationDto {
   driverId?: string;
 
   @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @IsOptional()
   @IsEnum(TripStatus)
   status?: TripStatus;
 

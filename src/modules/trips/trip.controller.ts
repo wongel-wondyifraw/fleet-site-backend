@@ -12,7 +12,9 @@ import {
   Query,
 } from '@nestjs/common';
 
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
+import { User } from '../users/user.entity';
 import {
   CreateTripDto,
   SetTripStatusDto,
@@ -27,49 +29,53 @@ export class TripController {
 
   @Get()
   @RequiresPermissions('trips.read')
-  findAll(@Query() query: TripQueryDto) {
-    return this.trips.findAll(query);
+  findAll(@CurrentUser() user: User, @Query() query: TripQueryDto) {
+    return this.trips.findAll(user, query);
   }
 
   @Get(':id')
   @RequiresPermissions('trips.read')
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.trips.findOne(id);
+  findOne(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.trips.findOne(user, id);
   }
 
   @Post()
   @RequiresPermissions('trips.create')
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() dto: CreateTripDto) {
-    return this.trips.create(dto);
+  create(@CurrentUser() user: User, @Body() dto: CreateTripDto) {
+    return this.trips.create(user, dto);
   }
 
   @Patch(':id')
   @RequiresPermissions('trips.update')
   update(
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateTripDto,
   ) {
-    return this.trips.update(id, dto);
+    return this.trips.update(user, id, dto);
   }
 
-  // Dedicated transition endpoint used by the Trip Checkout / Check-in /
-  // Cancel buttons. Kept separate from PATCH /trips/:id so the side-effects
-  // (start/complete timestamps and check-in distance) are explicit and
-  // never accidentally triggered by a regular field edit.
   @Patch(':id/status')
   @RequiresPermissions('trips.update')
   setStatus(
+    @CurrentUser() user: User,
     @Param('id', ParseUUIDPipe) id: string,
     @Body() body: SetTripStatusDto,
   ) {
-    return this.trips.setStatus(id, body.status, body.distanceKm ?? null);
+    return this.trips.setStatus(user, id, body.status, body.distanceKm ?? null);
   }
 
   @Delete(':id')
   @RequiresPermissions('trips.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseUUIDPipe) id: string) {
-    return this.trips.remove(id);
+  remove(
+    @CurrentUser() user: User,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    return this.trips.remove(user, id);
   }
 }

@@ -10,6 +10,7 @@ export interface NotificationDomainEvent {
   message: string;
   href?: string;
   siteName?: string | null;
+  siteId?: string | null;
   targetRoles: string[];
   includeAdmins?: boolean;
   dedupeKey?: string;
