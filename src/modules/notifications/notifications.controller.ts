@@ -68,6 +68,16 @@ export class NotificationsController {
     return { publicKey: this.notifications.getVapidPublicKey() };
   }
 
+  // Diagnostic endpoint: any authenticated user can fire a notification at
+  // themselves so they can confirm in-app + browser + push delivery without
+  // having to trigger a real domain event. Intended for staging / launch
+  // smoke tests; remove (or restrict to ADMIN) before broad rollout.
+  @Post('test-push')
+  @HttpCode(HttpStatus.CREATED)
+  testPush(@CurrentUser() user: User) {
+    return this.notifications.sendTestPush(user.id);
+  }
+
   @Post('subscriptions')
   @HttpCode(HttpStatus.CREATED)
   subscribe(

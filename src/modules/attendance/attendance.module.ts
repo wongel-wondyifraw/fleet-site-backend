@@ -1,10 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { AttendanceRulesModule } from '../attendance-rules/attendance-rules.module';
 import { Driver } from '../drivers/driver.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { Site } from '../sites/site.entity';
+import { TimeSettingsModule } from '../time-settings/time-settings.module';
 import { AttendanceController } from './attendance.controller';
+import { AttendanceCronService } from './attendance-cron.service';
 import { AttendanceDay } from './attendance-day.entity';
 import { AttendancePunch } from './attendance-punch.entity';
 import { Attendance } from './attendance.entity';
@@ -27,10 +30,12 @@ import { OdometerReading } from './odometer-reading.entity';
       Driver,
       Site,
     ]),
+    AttendanceRulesModule,
     NotificationsModule,
+    TimeSettingsModule,
   ],
   controllers: [AttendanceController],
-  providers: [AttendanceService],
+  providers: [AttendanceService, AttendanceCronService],
   exports: [AttendanceService],
 })
 export class AttendanceModule {}

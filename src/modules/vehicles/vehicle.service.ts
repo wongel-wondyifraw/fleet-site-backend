@@ -122,7 +122,9 @@ export class VehicleService implements OnModuleInit {
       });
 
       try {
-        return await this.repo.save(vehicle);
+        const saved = await this.repo.save(vehicle);
+        this.emitRegisteredNotification(saved);
+        return saved;
       } catch (err) {
         if (isUniqueViolation(err, 'assetNumber')) {
           continue;
@@ -144,10 +146,17 @@ export class VehicleService implements OnModuleInit {
   async update(id: string, dto: UpdateVehicleDto): Promise<Vehicle> {
     const vehicle = await this.findOne(id);
     const previousStatus = vehicle.status;
+    const previousSite = vehicle.assignedSite ?? null;
     Object.assign(vehicle, dto);
     const saved = await this.repo.save(vehicle);
     if (dto.status && dto.status !== previousStatus) {
       this.emitStatusNotification(saved);
+    }
+    if (
+      dto.assignedSite !== undefined &&
+      (dto.assignedSite ?? null) !== previousSite
+    ) {
+      this.emitSiteChangeNotification(saved, previousSite);
     }
     return saved;
   }
@@ -211,6 +220,58 @@ export class VehicleService implements OnModuleInit {
       targetRoles: [UserRole.SITE_MANAGER],
       dedupeKey: `vehicle.status:${vehicle.id}:${vehicle.status}`,
       payload: { vehicleId: vehicle.id, status: vehicle.status },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
+  }
+
+  private emitRegisteredNotification(vehicle: Vehicle): void {
+    const label = vehicle.assetNumber ?? vehicle.plateNumber;
+    const event: NotificationDomainEvent = {
+      eventName: 'vehicle.registered',
+      kind: NotificationKind.VEHICLE,
+      severity: NotificationSeverity.SUCCESS,
+      title: 'New vehicle registered',
+      message: `${label} (${vehicle.type.toLowerCase()}) was added to the fleet.`,
+      href: '/vehicles',
+      siteName: vehicle.assignedSite ?? null,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `vehicle.registered:${vehicle.id}`,
+      payload: {
+        vehicleId: vehicle.id,
+        assetNumber: vehicle.assetNumber,
+        plateNumber: vehicle.plateNumber,
+      },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
+  }
+
+  // Emits a notification for the NEW site whenever a vehicle moves between
+  // sites. We deliberately target the new site (admins always receive it via
+  // includeAdmins) — the old site's manager loses operational interest in
+  // the vehicle the moment it's reassigned.
+  private emitSiteChangeNotification(
+    vehicle: Vehicle,
+    previousSite: string | null,
+  ): void {
+    const label = vehicle.assetNumber ?? vehicle.plateNumber;
+    const nextSite = vehicle.assignedSite ?? null;
+    const from = previousSite ?? 'unassigned';
+    const to = nextSite ?? 'unassigned';
+    const event: NotificationDomainEvent = {
+      eventName: 'vehicle.site_changed',
+      kind: NotificationKind.VEHICLE,
+      severity: NotificationSeverity.INFO,
+      title: 'Vehicle reassigned to a new site',
+      message: `${label} moved from ${from} to ${to}.`,
+      href: '/vehicles',
+      siteName: nextSite,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `vehicle.site_changed:${vehicle.id}:${to}`,
+      payload: {
+        vehicleId: vehicle.id,
+        previousSite,
+        assignedSite: nextSite,
+      },
     };
     this.events.emit(NOTIFICATION_EVENT, event);
   }

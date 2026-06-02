@@ -155,6 +155,24 @@ export class NotificationsService {
     this.emit(userId, { type: 'notification.updated', unreadCount: 0 });
   }
 
+  // Convenience wrapper used by the "Send test notification" button in the
+  // settings panel. Skips the dedupe key so the user can fire repeated
+  // tests without hitting the unique-index, and routes through the same
+  // create() path as real notifications so SSE + push + browser toast
+  // behave identically.
+  async sendTestPush(userId: string): Promise<NotificationApiItem> {
+    return this.create({
+      userId,
+      kind: NotificationKind.SYSTEM,
+      severity: NotificationSeverity.INFO,
+      title: 'Test notification',
+      message:
+        'If you see this, in-app, browser and push delivery are working on this device.',
+      href: '/notifications',
+      payload: { test: true, sentAt: new Date().toISOString() },
+    });
+  }
+
   async create(input: CreateNotificationInput): Promise<NotificationApiItem> {
     this.guardCreationRate(input.userId);
     const entity = this.notifications.create({

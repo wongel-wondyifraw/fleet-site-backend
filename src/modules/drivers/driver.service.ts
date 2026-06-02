@@ -182,11 +182,15 @@ export class DriverService implements OnModuleInit {
       payload: { driverId: saved.id },
     };
     this.events.emit(NOTIFICATION_EVENT, event);
+    if (saved.assignedVehicleId) {
+      await this.emitVehicleAssignment(saved, saved.assignedVehicleId);
+    }
     return saved;
   }
 
   async update(id: string, dto: UpdateDriverDto): Promise<Driver> {
     const driver = await this.findOne(id);
+    const previousVehicleId = driver.assignedVehicleId ?? null;
 
     if (dto.licenseNumber && dto.licenseNumber !== driver.licenseNumber) {
       await this.ensureUnique(undefined, dto.licenseNumber);
@@ -208,7 +212,15 @@ export class DriverService implements OnModuleInit {
         dto.assignedVehicleId,
       );
     }
-    return this.repo.save(driver);
+    const saved = await this.repo.save(driver);
+    if (
+      dto.assignedVehicleId !== undefined &&
+      dto.assignedVehicleId &&
+      dto.assignedVehicleId !== previousVehicleId
+    ) {
+      await this.emitVehicleAssignment(saved, dto.assignedVehicleId);
+    }
+    return saved;
   }
 
   async assignVehicle(id: string, dto: AssignVehicleDto): Promise<Driver> {
@@ -219,8 +231,13 @@ export class DriverService implements OnModuleInit {
       );
     }
     await this.vehicles.findOne(dto.vehicleId);
+    const previousVehicleId = driver.assignedVehicleId ?? null;
     driver.assignedVehicleId = dto.vehicleId;
-    return this.repo.save(driver);
+    const saved = await this.repo.save(driver);
+    if (dto.vehicleId !== previousVehicleId) {
+      await this.emitVehicleAssignment(saved, dto.vehicleId);
+    }
+    return saved;
   }
 
   async unassignVehicle(id: string): Promise<Driver> {
@@ -243,6 +260,39 @@ export class DriverService implements OnModuleInit {
     if (!result.affected) {
       throw new NotFoundException(`Driver ${id} not found`);
     }
+  }
+
+  // Notifies the new site's manager (plus admins) that a driver has been
+  // assigned to a vehicle. Dedupe key embeds both ids so re-assigning the
+  // same driver/vehicle pair is idempotent within a notification cycle.
+  private async emitVehicleAssignment(
+    driver: Driver,
+    vehicleId: string,
+  ): Promise<void> {
+    let vehicleLabel = vehicleId;
+    let siteName: string | null = driver.homeSite ?? null;
+    try {
+      const vehicle = await this.vehicles.findOne(vehicleId);
+      vehicleLabel = vehicle.assetNumber ?? vehicle.plateNumber ?? vehicleId;
+      siteName = vehicle.assignedSite ?? siteName;
+    } catch {
+      // Vehicle lookup is best-effort here; the assignment itself already
+      // succeeded so we still want to fire the notification.
+    }
+
+    const event: NotificationDomainEvent = {
+      eventName: 'driver.assigned_to_vehicle',
+      kind: NotificationKind.DRIVER,
+      severity: NotificationSeverity.INFO,
+      title: 'Driver assigned to a vehicle',
+      message: `${driver.firstName} ${driver.lastName} is now driving ${vehicleLabel}.`,
+      href: '/drivers',
+      siteName,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `driver.assigned_to_vehicle:${driver.id}:${vehicleId}`,
+      payload: { driverId: driver.id, vehicleId },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
   }
 
   /** Driver site is derived from the assigned vehicle's site (by name). */

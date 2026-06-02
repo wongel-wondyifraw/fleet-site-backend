@@ -1,7 +1,17 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { UserRole } from '../../common/enums';
+import {
+  NotificationKind,
+  NotificationSeverity,
+} from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import { AppSetting } from '../trip-targets/app-setting.entity';
 import { AttendanceRulesDto } from './attendance-rules.dto';
 
@@ -39,6 +49,7 @@ export class AttendanceRulesService {
   constructor(
     @InjectRepository(AppSetting)
     private readonly settings: Repository<AppSetting>,
+    private readonly events: EventEmitter2,
   ) {}
 
   async getRules(): Promise<AttendanceRules> {
@@ -85,7 +96,27 @@ export class AttendanceRulesService {
       this.upsertKey(KEYS.targetHours, String(dto.targetHours)),
     ]);
 
-    return this.getRules();
+    const next = await this.getRules();
+    this.emitRulesChanged(next);
+    return next;
+  }
+
+  private emitRulesChanged(rules: AttendanceRules): void {
+    const event: NotificationDomainEvent = {
+      eventName: 'attendance.rules_changed',
+      kind: NotificationKind.ATTENDANCE,
+      severity: NotificationSeverity.INFO,
+      title: 'Attendance schedule updated',
+      message: `New schedule: in ${rules.dayInTime}, lunch ${rules.lunchOutTime}-${rules.lunchInTime}, out ${rules.dayOutTime} (target ${rules.targetHours}h).`,
+      href: '/settings?section=attendance',
+      targetRoles: [UserRole.SITE_MANAGER, UserRole.TIME_KEEPER],
+      // We intentionally do NOT dedupe by rule content — every save should
+      // notify so reviewers see the audit trail. Embedding the ISO timestamp
+      // keeps the unique constraint happy for rapid edits.
+      dedupeKey: `attendance.rules_changed:${new Date().toISOString()}`,
+      payload: { ...rules },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
   }
 
   private assertScheduleOrder(dto: AttendanceRulesDto): void {

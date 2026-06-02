@@ -24,6 +24,7 @@ import {
   SiteShift,
   UserRole,
 } from '../../common/enums';
+import { AttendanceRulesService } from '../attendance-rules/attendance-rules.service';
 import { Driver } from '../drivers/driver.entity';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
@@ -80,8 +81,49 @@ export class AttendanceService {
     @InjectRepository(Site)
     private readonly sites: Repository<Site>,
     private readonly calculated: CalculatedService,
+    private readonly attendanceRules: AttendanceRulesService,
     private readonly events: EventEmitter2,
   ) {}
+
+  // Drivers expected to have a DAY_IN by `cutoffTimeHHmm` on `date` but who
+  // still don't. Used by AttendanceCronService to fire one missed-check-in
+  // notification per driver per day after the dayInTime grace passes.
+  // Returns one row per driver with the data the listener needs to render
+  // a useful notification.
+  async findDriversMissingDayIn(date: string): Promise<
+    Array<{
+      driver: Driver;
+      day: AttendanceDay | null;
+      siteName: string | null;
+    }>
+  > {
+    const days = await this.days.find({
+      where: { date },
+      relations: { driver: true, site: true, punches: true },
+    });
+
+    const out: Array<{
+      driver: Driver;
+      day: AttendanceDay | null;
+      siteName: string | null;
+    }> = [];
+    for (const day of days) {
+      if (day.status === AttendanceDayStatus.ON_LEAVE) continue;
+      const live = (day.punches ?? []).filter((p) => !p.isVoided);
+      const hasDayIn = live.some(
+        (p) => p.type === AttendancePunchType.DAY_IN,
+      );
+      if (hasDayIn) continue;
+      if (!day.driver) continue;
+      if (day.driver.status !== DriverStatus.ACTIVE) continue;
+      out.push({
+        driver: day.driver,
+        day,
+        siteName: day.site?.name ?? null,
+      });
+    }
+    return out;
+  }
 
   // -------------------------------------------------------------------------
   // Legacy Attendance API (preserved for backwards compatibility).
@@ -422,7 +464,9 @@ export class AttendanceService {
     });
 
     await this.recomputeWorkDistance(day.id);
-    return this.recalcSingleDay(day.id);
+    const refreshed = await this.recalcSingleDay(day.id);
+    await this.emitPunchSideEffects(refreshed, dto.type, punchAt);
+    return refreshed;
   }
 
   async updateDayNew(
@@ -925,6 +969,129 @@ export class AttendanceService {
         }
       }
     }
+  }
+
+  // Punch-driven notifications: late check-in + maintenance in/out. Called
+  // from createPunch() so each clock event can fan out the right alert.
+  // We deliberately don't fan out for LUNCH_* (too noisy) or for DAY_IN
+  // punches that arrive on time. Failures don't propagate — the punch is
+  // already persisted and the notification system is best-effort.
+  private async emitPunchSideEffects(
+    day: AttendanceDay,
+    type: AttendancePunchType,
+    punchAt: Date,
+  ): Promise<void> {
+    try {
+      if (type === AttendancePunchType.DAY_IN) {
+        await this.maybeEmitLateCheckIn(day, punchAt);
+        return;
+      }
+      if (
+        type === AttendancePunchType.MAINT_OUT ||
+        type === AttendancePunchType.MAINT_IN
+      ) {
+        this.emitMaintenancePunch(day, type, punchAt);
+        return;
+      }
+    } catch (err) {
+      // Notification dispatch is best-effort; never fail the punch.
+      // The listener already logs domain-level errors, this catch covers
+      // the rules lookup and other ancillary failures.
+      void err;
+    }
+  }
+
+  private async maybeEmitLateCheckIn(
+    day: AttendanceDay,
+    punchAt: Date,
+  ): Promise<void> {
+    const rules = await this.attendanceRules.getRules();
+    const [hh, mm] = rules.dayInTime.split(':').map(Number);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm)) return;
+
+    // Anchor expected check-in to the punch's local day so the comparison
+    // works even when the cron / clients submit a backfilled punch for a
+    // prior date.
+    const expected = new Date(punchAt);
+    expected.setHours(hh, mm, 0, 0);
+
+    // 15-minute grace — anything beyond that is treated as "late". This
+    // matches the typical attendance allowance for a daily-rate workforce.
+    const graceMs = 15 * 60_000;
+    const lateMs = punchAt.getTime() - expected.getTime() - graceMs;
+    if (lateMs <= 0) return;
+
+    const lateMinutes = Math.round((punchAt.getTime() - expected.getTime()) / 60_000);
+    const driverName = day.driver
+      ? `${day.driver.firstName} ${day.driver.lastName}`
+      : 'A driver';
+    const siteName = day.site?.name ?? null;
+    const event: NotificationDomainEvent = {
+      eventName: 'attendance.late_check_in',
+      kind: NotificationKind.ATTENDANCE,
+      severity: NotificationSeverity.WARNING,
+      title: 'Driver checked in late',
+      message: `${driverName} checked in ${lateMinutes} minutes after ${rules.dayInTime}.`,
+      href: '/attendance',
+      siteName,
+      targetRoles: [UserRole.TIME_KEEPER, UserRole.SITE_MANAGER],
+      dedupeKey: `attendance.late_check_in:${day.id}`,
+      payload: {
+        attendanceDayId: day.id,
+        driverId: day.driverId,
+        siteId: day.siteId,
+        date: day.date,
+        lateMinutes,
+        rule: rules.dayInTime,
+      },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
+  }
+
+  private emitMaintenancePunch(
+    day: AttendanceDay,
+    type: AttendancePunchType.MAINT_OUT | AttendancePunchType.MAINT_IN,
+    punchAt: Date,
+  ): void {
+    const isCheckout = type === AttendancePunchType.MAINT_OUT;
+    const driverName = day.driver
+      ? `${day.driver.firstName} ${day.driver.lastName}`
+      : 'A driver';
+    const vehicleName =
+      day.driver?.assignedVehicle?.assetNumber ??
+      day.driver?.assignedVehicle?.plateNumber ??
+      'a vehicle';
+    const siteName = day.site?.name ?? null;
+    const event: NotificationDomainEvent = {
+      eventName: isCheckout
+        ? 'attendance.maintenance_checkout'
+        : 'attendance.maintenance_checkin',
+      kind: NotificationKind.ATTENDANCE,
+      severity: NotificationSeverity.INFO,
+      title: isCheckout
+        ? 'Vehicle out for maintenance'
+        : 'Vehicle back from maintenance',
+      message: isCheckout
+        ? `${driverName} took ${vehicleName} out for maintenance.`
+        : `${driverName} returned ${vehicleName} from maintenance.`,
+      href: '/attendance',
+      siteName,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `${
+        isCheckout
+          ? 'attendance.maintenance_checkout'
+          : 'attendance.maintenance_checkin'
+      }:${day.id}:${punchAt.toISOString()}`,
+      payload: {
+        attendanceDayId: day.id,
+        driverId: day.driverId,
+        siteId: day.siteId,
+        date: day.date,
+        vehicleId: day.driver?.assignedVehicleId ?? null,
+        at: punchAt.toISOString(),
+      },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
   }
 
   private emitAttendanceException(
