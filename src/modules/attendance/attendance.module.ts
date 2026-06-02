@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { Driver } from '../drivers/driver.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Site } from '../sites/site.entity';
 import { AttendanceController } from './attendance.controller';
 import { AttendanceDay } from './attendance-day.entity';
@@ -26,6 +27,7 @@ import { OdometerReading } from './odometer-reading.entity';
       Driver,
       Site,
     ]),
+    NotificationsModule,
   ],
   controllers: [AttendanceController],
   providers: [AttendanceService],

@@ -4,6 +4,7 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, QueryFailedError, Repository } from 'typeorm';
 
@@ -13,7 +14,12 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { VehicleStatus } from '../../common/enums';
+import { UserRole, VehicleStatus } from '../../common/enums';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import {
   CreateVehicleDto,
   UpdateVehicleDto,
@@ -26,6 +32,7 @@ export class VehicleService implements OnModuleInit {
   constructor(
     @InjectRepository(Vehicle)
     private readonly repo: Repository<Vehicle>,
+    private readonly events: EventEmitter2,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -136,14 +143,22 @@ export class VehicleService implements OnModuleInit {
 
   async update(id: string, dto: UpdateVehicleDto): Promise<Vehicle> {
     const vehicle = await this.findOne(id);
+    const previousStatus = vehicle.status;
     Object.assign(vehicle, dto);
-    return this.repo.save(vehicle);
+    const saved = await this.repo.save(vehicle);
+    if (dto.status && dto.status !== previousStatus) {
+      this.emitStatusNotification(saved);
+    }
+    return saved;
   }
 
   async setStatus(id: string, status: VehicleStatus): Promise<Vehicle> {
     const vehicle = await this.findOne(id);
+    const previousStatus = vehicle.status;
     vehicle.status = status;
-    return this.repo.save(vehicle);
+    const saved = await this.repo.save(vehicle);
+    if (status !== previousStatus) this.emitStatusNotification(saved);
+    return saved;
   }
 
   async remove(id: string): Promise<void> {
@@ -177,6 +192,27 @@ export class VehicleService implements OnModuleInit {
       vehicle.assetNumber = await this.nextAssetNumber();
       await this.repo.save(vehicle);
     }
+  }
+
+  private emitStatusNotification(vehicle: Vehicle): void {
+    const severity =
+      vehicle.status === VehicleStatus.IN_MAINTENANCE ||
+      vehicle.status === VehicleStatus.OUT_OF_SERVICE
+        ? NotificationSeverity.WARNING
+        : NotificationSeverity.INFO;
+    const event: NotificationDomainEvent = {
+      eventName: 'vehicle.status_changed',
+      kind: NotificationKind.VEHICLE,
+      severity,
+      title: `Vehicle status changed: ${vehicle.assetNumber ?? vehicle.plateNumber}`,
+      message: `${vehicle.assetNumber ?? vehicle.plateNumber} is now ${vehicle.status.replaceAll('_', ' ').toLowerCase()}.`,
+      href: '/vehicles',
+      siteName: vehicle.assignedSite ?? null,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `vehicle.status:${vehicle.id}:${vehicle.status}`,
+      payload: { vehicleId: vehicle.id, status: vehicle.status },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
   }
 }
 

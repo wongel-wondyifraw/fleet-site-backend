@@ -5,6 +5,7 @@ import {
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, ILike, LessThanOrEqual, Repository } from 'typeorm';
 
@@ -14,7 +15,12 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { DriverStatus, LicenseClass } from '../../common/enums';
+import { DriverStatus, LicenseClass, UserRole } from '../../common/enums';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import { SiteService } from '../sites/site.service';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
@@ -32,6 +38,7 @@ export class DriverService implements OnModuleInit {
     private readonly repo: Repository<Driver>,
     private readonly vehicles: VehicleService,
     private readonly sites: SiteService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -161,7 +168,21 @@ export class DriverService implements OnModuleInit {
       assignedVehicleId: dto.assignedVehicleId ?? null,
       homeSite: await this.homeSiteFromVehicleId(dto.assignedVehicleId ?? null),
     });
-    return this.repo.save(driver);
+    const saved = await this.repo.save(driver);
+    const event: NotificationDomainEvent = {
+      eventName: 'driver.onboarded',
+      kind: NotificationKind.DRIVER,
+      severity: NotificationSeverity.SUCCESS,
+      title: 'New driver onboarded',
+      message: `${saved.firstName} ${saved.lastName} joined the driver roster.`,
+      href: '/drivers',
+      siteName: saved.homeSite ?? null,
+      targetRoles: [UserRole.SITE_MANAGER],
+      dedupeKey: `driver.onboarded:${saved.id}`,
+      payload: { driverId: saved.id },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
+    return saved;
   }
 
   async update(id: string, dto: UpdateDriverDto): Promise<Driver> {

@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AttendanceModule } from '../attendance/attendance.module';
 import { AttendanceRulesModule } from '../attendance-rules/attendance-rules.module';
 import { FuelModule } from '../fuel/fuel.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { Site } from '../sites/site.entity';
 import { SiteModule } from '../sites/site.module';
 import { TimeSettingsModule } from '../time-settings/time-settings.module';
@@ -32,6 +33,7 @@ import { SiteScoringService } from './site-scoring.service';
     AttendanceModule,
     AttendanceRulesModule,
     FuelModule,
+    NotificationsModule,
     TripTargetModule,
     TimeSettingsModule,
     SiteModule,

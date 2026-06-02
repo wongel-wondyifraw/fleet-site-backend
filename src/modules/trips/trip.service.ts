@@ -4,6 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsWhere, Not, Repository } from 'typeorm';
 
@@ -13,7 +14,12 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { TripStatus } from '../../common/enums';
+import { TripStatus, UserRole } from '../../common/enums';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import { TripTargetService } from '../trip-targets/trip-target.service';
 import { DriverService } from '../drivers/driver.service';
 import { VehicleService } from '../vehicles/vehicle.service';
@@ -45,6 +51,7 @@ export class TripService {
     private readonly vehicles: VehicleService,
     private readonly drivers: DriverService,
     private readonly tripTargets: TripTargetService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async findAll(
@@ -184,7 +191,11 @@ export class TripService {
     }
 
     await this.repo.save(trip);
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    if (dto.status && dto.status !== previousStatus) {
+      this.emitTripStatusNotification(updated, dto.status);
+    }
+    return updated;
   }
 
   async setStatus(
@@ -218,7 +229,9 @@ export class TripService {
       trip.distanceKm = distanceKm;
     }
     await this.repo.save(trip);
-    return this.findOne(id);
+    const updated = await this.findOne(id);
+    this.emitTripStatusNotification(updated, next);
+    return updated;
   }
 
   async remove(id: string): Promise<void> {
@@ -249,6 +262,57 @@ export class TripService {
         'This driver already has an in-progress trip. Check it in or cancel it before adding another.',
       );
     }
+  }
+
+  private emitTripStatusNotification(trip: Trip, status: TripStatus): void {
+    const vehicleName = trip.vehicle?.assetNumber ?? trip.vehicle?.plateNumber ?? 'Vehicle';
+    const driverName = trip.driver
+      ? `${trip.driver.firstName} ${trip.driver.lastName}`
+      : 'Unassigned driver';
+    const route = `${trip.startAddress} to ${trip.endAddress}`;
+    const siteName = trip.vehicle?.assignedSite ?? null;
+
+    const eventByStatus: Partial<Record<TripStatus, NotificationDomainEvent>> = {
+      [TripStatus.IN_PROGRESS]: {
+        eventName: 'trip.dispatched',
+        kind: NotificationKind.TRIP,
+        severity: NotificationSeverity.INFO,
+        title: `Trip dispatched: ${vehicleName}`,
+        message: `${driverName} started ${route}.`,
+        href: '/trips',
+        siteName,
+        targetRoles: [UserRole.SITE_MANAGER],
+        dedupeKey: `trip.dispatched:${trip.id}`,
+        payload: { tripId: trip.id, status },
+      },
+      [TripStatus.COMPLETED]: {
+        eventName: 'trip.completed',
+        kind: NotificationKind.TRIP,
+        severity: NotificationSeverity.SUCCESS,
+        title: `Trip completed: ${vehicleName}`,
+        message: `${driverName} completed ${route}.`,
+        href: '/trips',
+        siteName,
+        targetRoles: [UserRole.SITE_MANAGER],
+        dedupeKey: `trip.completed:${trip.id}`,
+        payload: { tripId: trip.id, status },
+      },
+      [TripStatus.CANCELLED]: {
+        eventName: 'trip.cancelled',
+        kind: NotificationKind.TRIP,
+        severity: NotificationSeverity.WARNING,
+        title: `Trip cancelled: ${vehicleName}`,
+        message: `${driverName}'s trip from ${route} was cancelled.`,
+        href: '/trips',
+        siteName,
+        targetRoles: [UserRole.SITE_MANAGER],
+        dedupeKey: `trip.cancelled:${trip.id}`,
+        payload: { tripId: trip.id, status },
+      },
+    };
+
+    const event = eventByStatus[status];
+    if (event) this.events.emit(NOTIFICATION_EVENT, event);
   }
 }
 

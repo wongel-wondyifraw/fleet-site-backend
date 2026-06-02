@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
   Between,
@@ -21,8 +22,14 @@ import {
   DriverStatus,
   ODOMETER_REQUIRED_PUNCH_TYPES,
   SiteShift,
+  UserRole,
 } from '../../common/enums';
 import { Driver } from '../drivers/driver.entity';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import { Site } from '../sites/site.entity';
 import {
   AttendanceDriverHistoryQueryDto,
@@ -73,6 +80,7 @@ export class AttendanceService {
     @InjectRepository(Site)
     private readonly sites: Repository<Site>,
     private readonly calculated: CalculatedService,
+    private readonly events: EventEmitter2,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -876,6 +884,7 @@ export class AttendanceService {
       if (next !== day.status) {
         day.status = next;
         dirty.push(day);
+        this.emitAttendanceException(day, next);
       }
     }
     if (dirty.length > 0) {
@@ -916,6 +925,35 @@ export class AttendanceService {
         }
       }
     }
+  }
+
+  private emitAttendanceException(
+    day: AttendanceDay,
+    status: AttendanceDayStatus,
+  ): void {
+    if (status !== AttendanceDayStatus.ABSENT) return;
+    const driverName = day.driver
+      ? `${day.driver.firstName} ${day.driver.lastName}`
+      : 'A driver';
+    const siteName = day.site?.name ?? null;
+    const event: NotificationDomainEvent = {
+      eventName: 'attendance.absent',
+      kind: NotificationKind.ATTENDANCE,
+      severity: NotificationSeverity.DANGER,
+      title: 'Driver marked absent',
+      message: `${driverName} was marked absent for ${day.date}.`,
+      href: '/attendance',
+      siteName,
+      targetRoles: [UserRole.TIME_KEEPER, UserRole.SITE_MANAGER],
+      dedupeKey: `attendance.absent:${day.id}`,
+      payload: {
+        attendanceDayId: day.id,
+        driverId: day.driverId,
+        siteId: day.siteId,
+        date: day.date,
+      },
+    };
+    this.events.emit(NOTIFICATION_EVENT, event);
   }
 
   // True when the day has at least one odometer reading but a live punch

@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 
@@ -12,6 +13,11 @@ import { AttendanceRulesService } from '../attendance-rules/attendance-rules.ser
 import { FuelConsumptionService } from '../fuel/fuel-consumption.service';
 import { TimeSettingsService } from '../time-settings/time-settings.service';
 import { TripTargetService } from '../trip-targets/trip-target.service';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import { Trip } from '../trips/trip.entity';
 import { User } from '../users/user.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
@@ -37,6 +43,7 @@ export class SiteHealthService {
     private readonly tripTargets: TripTargetService,
     private readonly timeSettings: TimeSettingsService,
     private readonly scoring: SiteScoringService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async getTodayKey(): Promise<string> {
@@ -128,7 +135,28 @@ export class SiteHealthService {
       computedAt,
     });
 
-    return this.snapshots.save(entity);
+    const saved = await this.snapshots.save(entity);
+    if (saved.status === 'CRITICAL') {
+      const event: NotificationDomainEvent = {
+        eventName: 'site_health.score_dropped',
+        kind: NotificationKind.SITE_HEALTH,
+        severity: NotificationSeverity.DANGER,
+        title: 'Site health critical',
+        message: `Site ${saved.site?.name ?? saved.siteId} dropped to CRITICAL on ${saved.date}.`,
+        href: '/sites',
+        siteName: saved.site?.name ?? null,
+        targetRoles: [UserRole.SITE_MANAGER],
+        dedupeKey: `site_health.critical:${saved.siteId}:${saved.date}`,
+        payload: {
+          siteId: saved.siteId,
+          date: saved.date,
+          score: saved.score,
+          status: saved.status,
+        },
+      };
+      this.events.emit(NOTIFICATION_EVENT, event);
+    }
+    return saved;
   }
 
   async findSnapshot(

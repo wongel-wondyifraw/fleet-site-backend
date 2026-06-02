@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -13,6 +14,12 @@ import {
   resolveLimit,
 } from '../../common/dto/pagination.dto';
 import { CalculatedService } from '../../common/calculated.service';
+import { UserRole } from '../../common/enums';
+import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
+import {
+  NOTIFICATION_EVENT,
+  NotificationDomainEvent,
+} from '../notifications/notification-events';
 import { VehicleService } from '../vehicles/vehicle.service';
 import {
   CreateFuelLogDto,
@@ -31,6 +38,7 @@ export class FuelLogService {
     private readonly repo: Repository<FuelLog>,
     private readonly vehicles: VehicleService,
     private readonly calculated: CalculatedService,
+    private readonly events: EventEmitter2,
   ) {}
 
   async findAll(query: FuelLogQueryDto = {}): Promise<PageResponse<FuelLog>> {
@@ -99,6 +107,26 @@ export class FuelLogService {
       await this.vehicles.update(vehicle.id, {
         currentOdometer: dto.odometerReading,
       });
+    }
+    if (vehicle.fuelCapacity > 0 && dto.liters > vehicle.fuelCapacity) {
+      const event: NotificationDomainEvent = {
+        eventName: 'fuel.variance_flagged',
+        kind: NotificationKind.FUEL,
+        severity: NotificationSeverity.WARNING,
+        title: 'Fuel variance flagged',
+        message: `${vehicle.assetNumber ?? vehicle.plateNumber} logged ${dto.liters}L, above the ${vehicle.fuelCapacity}L configured capacity.`,
+        href: '/fuel',
+        siteName: vehicle.assignedSite ?? null,
+        targetRoles: [UserRole.SITE_MANAGER],
+        dedupeKey: `fuel.variance:${vehicle.id}:${toDateKey(new Date(dto.fillDate))}`,
+        payload: {
+          fuelLogId: saved.id,
+          vehicleId: vehicle.id,
+          liters: dto.liters,
+          fuelCapacity: vehicle.fuelCapacity,
+        },
+      };
+      this.events.emit(NOTIFICATION_EVENT, event);
     }
     return saved;
   }

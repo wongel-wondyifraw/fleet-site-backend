@@ -4,6 +4,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 // TypeOrmModule connects to PostgreSQL and registers entities.
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 
 // Shared utilities (CalculatedService, etc.).
 import { CommonModule } from './common/common.module';
@@ -27,6 +28,10 @@ import { HealthModule } from './modules/health/health.module';
 // Fuel log feature module and entity.
 import { FuelLog } from './modules/fuel/fuel-log.entity';
 import { FuelModule } from './modules/fuel/fuel.module';
+import { NotificationPreference } from './modules/notifications/notification-preference.entity';
+import { Notification } from './modules/notifications/notification.entity';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PushSubscription } from './modules/notifications/push-subscription.entity';
 // Trip feature module and entity.
 import { Trip } from './modules/trips/trip.entity';
 import { TripModule } from './modules/trips/trip.module';
@@ -55,6 +60,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
   imports: [
     // Load .env from project root; available in every module via ConfigService.
     ConfigModule.forRoot({ isGlobal: true }),
+    EventEmitterModule.forRoot(),
     // Async DB config so credentials come from environment variables.
     // In hosted environments (Render/Supabase), prefer DATABASE_URL so the
     // app can connect through Supabase's pooler instead of falling back to
@@ -75,6 +81,9 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
             AttendancePunch,
             OdometerReading,
             FuelLog,
+            Notification,
+            PushSubscription,
+            NotificationPreference,
             Trip,
             AppSetting,
             DailyTripTargetOverride,
@@ -128,6 +137,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     AttendanceRulesModule,
     TimeSettingsModule,
     FuelModule,
+    NotificationsModule,
     TripModule,
     TripTargetModule,
     CustomTripRouteModule,
