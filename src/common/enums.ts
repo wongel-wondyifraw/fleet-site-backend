@@ -109,13 +109,6 @@ export enum SiteType {
   OTHER = 'OTHER',
 }
 
-// Roles for application users (login accounts); used by RolesGuard and JWT payload.
-export enum UserRole {
-  ADMIN = 'ADMIN',
-  SITE_MANAGER = 'SITE_MANAGER',
-  TIME_KEEPER = 'TIME_KEEPER',
-}
-
 // Lifecycle states for vehicle trips. PLANNED is the default on create;
 // IN_PROGRESS / COMPLETED / CANCELLED are set as the trip progresses.
 export enum TripStatus {

@@ -1,4 +1,3 @@
-// Nest HTTP decorators for building the REST controller.
 import {
   Body,
   Controller,
@@ -14,16 +13,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-
-// Role enum for the @Roles decorator.
-import { UserRole } from '../../common/enums';
-// @Roles attaches required roles metadata read by RolesGuard.
-import { Roles } from '../../common/decorators/roles.decorator';
-// JwtAuthGuard ensures a valid Bearer token is present.
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-// RolesGuard enforces the @Roles metadata after authentication.
-import { RolesGuard } from '../../common/guards/roles.guard';
-// DTOs validated by the global ValidationPipe.
+import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import {
   AssignSitesDto,
   ChangePasswordDto,
@@ -32,40 +24,34 @@ import {
   UpdateUserDto,
   UserQueryDto,
 } from './user.dto';
-// Business logic lives in the service.
 import { UsersService } from './user.service';
 
-// All routes under /api/users (global prefix is set in main.ts).
 @Controller('users')
-// Every endpoint requires a valid JWT.
-@UseGuards(JwtAuthGuard, RolesGuard)
-// Every endpoint requires ADMIN role (site-scoped auth is a future TODO).
-@Roles(UserRole.ADMIN)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class UsersController {
-  // Inject the service via Nest DI.
   constructor(private readonly users: UsersService) {}
 
-  // GET /api/users?role=&siteId=&isActive=&search=
   @Get()
+  @RequiresPermissions('users.read')
   findAll(@Query() query: UserQueryDto) {
     return this.users.findAll(query);
   }
 
-  // GET /api/users/:id
   @Get(':id')
+  @RequiresPermissions('users.read')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.users.findOne(id);
   }
 
-  // POST /api/users - create a new account.
   @Post()
+  @RequiresPermissions('users.create')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
   }
 
-  // PATCH /api/users/:id - update profile fields.
   @Patch(':id')
+  @RequiresPermissions('users.update')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateUserDto,
@@ -73,17 +59,17 @@ export class UsersController {
     return this.users.update(id, dto);
   }
 
-  // PATCH /api/users/:id/role - change role only.
   @Patch(':id/role')
+  @RequiresPermissions('users.update')
   setRole(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SetRoleDto,
   ) {
-    return this.users.setRole(id, dto.role);
+    return this.users.setRole(id, dto.roleId);
   }
 
-  // PATCH /api/users/:id/password - admin password reset (no current password).
   @Patch(':id/password')
+  @RequiresPermissions('users.update')
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetPassword(
     @Param('id', ParseUUIDPipe) id: string,
@@ -92,8 +78,8 @@ export class UsersController {
     await this.users.resetPassword(id, dto.newPassword);
   }
 
-  // PUT /api/users/:id/sites - replace the full site assignment set.
   @Put(':id/sites')
+  @RequiresPermissions('users.update')
   assignSites(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AssignSitesDto,
@@ -101,8 +87,8 @@ export class UsersController {
     return this.users.assignSites(id, dto.siteIds);
   }
 
-  // POST /api/users/:id/sites/:siteId - add one site.
   @Post(':id/sites/:siteId')
+  @RequiresPermissions('users.update')
   addSite(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -110,8 +96,8 @@ export class UsersController {
     return this.users.addSite(id, siteId);
   }
 
-  // DELETE /api/users/:id/sites/:siteId - remove one site.
   @Delete(':id/sites/:siteId')
+  @RequiresPermissions('users.update')
   removeSite(
     @Param('id', ParseUUIDPipe) id: string,
     @Param('siteId', ParseUUIDPipe) siteId: string,
@@ -119,8 +105,8 @@ export class UsersController {
     return this.users.removeSite(id, siteId);
   }
 
-  // DELETE /api/users/:id - soft delete (sets isActive=false).
   @Delete(':id')
+  @RequiresPermissions('users.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   async deactivate(@Param('id', ParseUUIDPipe) id: string) {
     await this.users.deactivate(id);

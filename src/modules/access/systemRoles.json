@@ -1,0 +1,41 @@
+[
+  {
+    "key": "ADMIN",
+    "name": "Administrator",
+    "description": "Full system access",
+    "permissionSlugs": "*"
+  },
+  {
+    "key": "SITE_MANAGER",
+    "name": "Site Manager",
+    "description": "Manage sites, fleet, trips, attendance, and fuel",
+    "permissionSlugs": [
+      "sites.read", "sites.create", "sites.update", "sites.delete",
+      "vehicles.read", "vehicles.create", "vehicles.update", "vehicles.delete",
+      "drivers.read", "drivers.create", "drivers.update", "drivers.delete",
+      "trips.read", "trips.create", "trips.update", "trips.delete",
+      "attendance.read", "attendance.create", "attendance.update", "attendance.delete",
+      "fuel.read", "fuel.create", "fuel.update", "fuel.delete",
+      "notifications.read", "notifications.update",
+      "site-health.read",
+      "trip-targets.read", "trip-targets.create", "trip-targets.update", "trip-targets.delete",
+      "custom-routes.read", "custom-routes.create", "custom-routes.update", "custom-routes.delete",
+      "attendance-rules.read", "attendance-rules.update",
+      "time-settings.read",
+      "reports.digest.receive"
+    ]
+  },
+  {
+    "key": "TIME_KEEPER",
+    "name": "Time Keeper",
+    "description": "Record attendance and view basic fleet data",
+    "permissionSlugs": [
+      "sites.read",
+      "vehicles.read",
+      "drivers.read",
+      "attendance.read", "attendance.create", "attendance.update",
+      "notifications.read", "notifications.update",
+      "time-settings.read"
+    ]
+  }
+]

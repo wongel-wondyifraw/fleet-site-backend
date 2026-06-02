@@ -1,4 +1,3 @@
-import { UserRole } from '../../common/enums';
 import { NotificationKind, NotificationSeverity } from './notification.entity';
 
 export const NOTIFICATION_EVENT = 'notifications.domain';
@@ -11,7 +10,7 @@ export interface NotificationDomainEvent {
   message: string;
   href?: string;
   siteName?: string | null;
-  targetRoles: UserRole[];
+  targetRoles: string[];
   includeAdmins?: boolean;
   dedupeKey?: string;
   payload?: Record<string, unknown>;

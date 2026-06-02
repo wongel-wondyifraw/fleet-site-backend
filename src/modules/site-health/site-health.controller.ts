@@ -8,10 +8,8 @@ import {
 } from '@nestjs/common';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
-import { UserRole } from '../../common/enums';
+import { ROLE_ADMIN } from '../access/role-keys';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../common/guards/roles.guard';
 import { SiteService } from '../sites/site.service';
 import { User } from '../users/user.entity';
 import {
@@ -21,7 +19,7 @@ import {
 import { SiteHealthService } from './site-health.service';
 
 @Controller('sites')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard)
 export class SiteHealthController {
   constructor(
     private readonly siteHealth: SiteHealthService,
@@ -40,7 +38,7 @@ export class SiteHealthController {
       : [];
 
     if (siteIds.length === 0) {
-      if (user.role !== UserRole.ADMIN) {
+      if (user.role?.key !== ROLE_ADMIN) {
         siteIds = (user.sites ?? []).map((s) => s.id);
       } else {
         const all = await this.sites.findAll({});

@@ -3,7 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
-import { UserRole } from '../../common/enums';
+import { ROLE_SITE_MANAGER, ROLE_TIME_KEEPER } from '../access/role-keys';
 import {
   NotificationKind,
   NotificationSeverity,
@@ -109,7 +109,7 @@ export class AttendanceRulesService {
       title: 'Attendance schedule updated',
       message: `New schedule: in ${rules.dayInTime}, lunch ${rules.lunchOutTime}-${rules.lunchInTime}, out ${rules.dayOutTime} (target ${rules.targetHours}h).`,
       href: '/settings?section=attendance',
-      targetRoles: [UserRole.SITE_MANAGER, UserRole.TIME_KEEPER],
+      targetRoles: [ROLE_SITE_MANAGER, ROLE_TIME_KEEPER],
       // We intentionally do NOT dedupe by rule content — every save should
       // notify so reviewers see the audit trail. Embedding the ISO timestamp
       // keeps the unique constraint happy for rapid edits.

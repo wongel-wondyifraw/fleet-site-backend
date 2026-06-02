@@ -22,8 +22,8 @@ import {
   DriverStatus,
   ODOMETER_REQUIRED_PUNCH_TYPES,
   SiteShift,
-  UserRole,
 } from '../../common/enums';
+import { ROLE_SITE_MANAGER, ROLE_TIME_KEEPER } from '../access/role-keys';
 import { AttendanceRulesService } from '../attendance-rules/attendance-rules.service';
 import { Driver } from '../drivers/driver.entity';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
@@ -1034,7 +1034,7 @@ export class AttendanceService {
       message: `${driverName} checked in ${lateMinutes} minutes after ${rules.dayInTime}.`,
       href: '/attendance',
       siteName,
-      targetRoles: [UserRole.TIME_KEEPER, UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_TIME_KEEPER, ROLE_SITE_MANAGER],
       dedupeKey: `attendance.late_check_in:${day.id}`,
       payload: {
         attendanceDayId: day.id,
@@ -1076,7 +1076,7 @@ export class AttendanceService {
         : `${driverName} returned ${vehicleName} from maintenance.`,
       href: '/attendance',
       siteName,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `${
         isCheckout
           ? 'attendance.maintenance_checkout'
@@ -1111,7 +1111,7 @@ export class AttendanceService {
       message: `${driverName} was marked absent for ${day.date}.`,
       href: '/attendance',
       siteName,
-      targetRoles: [UserRole.TIME_KEEPER, UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_TIME_KEEPER, ROLE_SITE_MANAGER],
       dedupeKey: `attendance.absent:${day.id}`,
       payload: {
         attendanceDayId: day.id,

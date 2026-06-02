@@ -14,7 +14,8 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { TripStatus, UserRole } from '../../common/enums';
+import { TripStatus } from '../../common/enums';
+import { ROLE_SITE_MANAGER } from '../access/role-keys';
 import {
   NOTIFICATION_EVENT,
   NotificationDomainEvent,
@@ -281,7 +282,7 @@ export class TripService {
         message: `${driverName} started ${route}.`,
         href: '/trips',
         siteName,
-        targetRoles: [UserRole.SITE_MANAGER],
+        targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.dispatched:${trip.id}`,
         payload: { tripId: trip.id, status },
       },
@@ -293,7 +294,7 @@ export class TripService {
         message: `${driverName} completed ${route}.`,
         href: '/trips',
         siteName,
-        targetRoles: [UserRole.SITE_MANAGER],
+        targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.completed:${trip.id}`,
         payload: { tripId: trip.id, status },
       },
@@ -305,7 +306,7 @@ export class TripService {
         message: `${driverName}'s trip from ${route} was cancelled.`,
         href: '/trips',
         siteName,
-        targetRoles: [UserRole.SITE_MANAGER],
+        targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `trip.cancelled:${trip.id}`,
         payload: { tripId: trip.id, status },
       },

@@ -14,7 +14,7 @@ import {
   resolveLimit,
 } from '../../common/dto/pagination.dto';
 import { CalculatedService } from '../../common/calculated.service';
-import { UserRole } from '../../common/enums';
+import { ROLE_SITE_MANAGER } from '../access/role-keys';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
   NOTIFICATION_EVENT,
@@ -117,7 +117,7 @@ export class FuelLogService {
         message: `${vehicle.assetNumber ?? vehicle.plateNumber} logged ${dto.liters}L, above the ${vehicle.fuelCapacity}L configured capacity.`,
         href: '/fuel',
         siteName: vehicle.assignedSite ?? null,
-        targetRoles: [UserRole.SITE_MANAGER],
+        targetRoles: [ROLE_SITE_MANAGER],
         dedupeKey: `fuel.variance:${vehicle.id}:${toDateKey(new Date(dto.fillDate))}`,
         payload: {
           fuelLogId: saved.id,

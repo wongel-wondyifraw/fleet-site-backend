@@ -14,7 +14,8 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { UserRole, VehicleStatus } from '../../common/enums';
+import { VehicleStatus } from '../../common/enums';
+import { ROLE_SITE_MANAGER } from '../access/role-keys';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
   NOTIFICATION_EVENT,
@@ -217,7 +218,7 @@ export class VehicleService implements OnModuleInit {
       message: `${vehicle.assetNumber ?? vehicle.plateNumber} is now ${vehicle.status.replaceAll('_', ' ').toLowerCase()}.`,
       href: '/vehicles',
       siteName: vehicle.assignedSite ?? null,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `vehicle.status:${vehicle.id}:${vehicle.status}`,
       payload: { vehicleId: vehicle.id, status: vehicle.status },
     };
@@ -234,7 +235,7 @@ export class VehicleService implements OnModuleInit {
       message: `${label} (${vehicle.type.toLowerCase()}) was added to the fleet.`,
       href: '/vehicles',
       siteName: vehicle.assignedSite ?? null,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `vehicle.registered:${vehicle.id}`,
       payload: {
         vehicleId: vehicle.id,
@@ -265,7 +266,7 @@ export class VehicleService implements OnModuleInit {
       message: `${label} moved from ${from} to ${to}.`,
       href: '/vehicles',
       siteName: nextSite,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `vehicle.site_changed:${vehicle.id}:${to}`,
       payload: {
         vehicleId: vehicle.id,

@@ -7,7 +7,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 
-import { UserRole } from '../../common/enums';
+import { ROLE_ADMIN } from '../access/role-keys';
 import { AttendanceService } from '../attendance/attendance.service';
 import { AttendanceRulesService } from '../attendance-rules/attendance-rules.service';
 import { FuelConsumptionService } from '../fuel/fuel-consumption.service';
@@ -145,7 +145,7 @@ export class SiteHealthService {
         message: `Site ${saved.site?.name ?? saved.siteId} dropped to CRITICAL on ${saved.date}.`,
         href: '/sites',
         siteName: saved.site?.name ?? null,
-        targetRoles: [UserRole.SITE_MANAGER],
+        targetRoles: ['SITE_MANAGER'],
         dedupeKey: `site_health.critical:${saved.siteId}:${saved.date}`,
         payload: {
           siteId: saved.siteId,
@@ -205,7 +205,7 @@ export class SiteHealthService {
   }
 
   assertSiteAccess(user: User, siteIds: string[]): string[] {
-    if (user.role === UserRole.ADMIN) return siteIds;
+    if (user.role?.key === ROLE_ADMIN) return siteIds;
     const allowed = new Set((user.sites ?? []).map((s) => s.id));
     const filtered = siteIds.filter((id) => allowed.has(id));
     if (filtered.length !== siteIds.length) {
@@ -218,7 +218,7 @@ export class SiteHealthService {
     user: User,
     requested?: string[],
   ): string[] {
-    if (user.role === UserRole.ADMIN) {
+    if (user.role?.key === ROLE_ADMIN) {
       return requested ?? [];
     }
     const allowed = (user.sites ?? []).map((s) => s.id);

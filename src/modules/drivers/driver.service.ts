@@ -15,7 +15,8 @@ import {
   parseCursor,
   resolveLimit,
 } from '../../common/dto/pagination.dto';
-import { DriverStatus, LicenseClass, UserRole } from '../../common/enums';
+import { DriverStatus, LicenseClass } from '../../common/enums';
+import { ROLE_SITE_MANAGER } from '../access/role-keys';
 import { NotificationKind, NotificationSeverity } from '../notifications/notification.entity';
 import {
   NOTIFICATION_EVENT,
@@ -177,7 +178,7 @@ export class DriverService implements OnModuleInit {
       message: `${saved.firstName} ${saved.lastName} joined the driver roster.`,
       href: '/drivers',
       siteName: saved.homeSite ?? null,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `driver.onboarded:${saved.id}`,
       payload: { driverId: saved.id },
     };
@@ -288,7 +289,7 @@ export class DriverService implements OnModuleInit {
       message: `${driver.firstName} ${driver.lastName} is now driving ${vehicleLabel}.`,
       href: '/drivers',
       siteName,
-      targetRoles: [UserRole.SITE_MANAGER],
+      targetRoles: [ROLE_SITE_MANAGER],
       dedupeKey: `driver.assigned_to_vehicle:${driver.id}:${vehicleId}`,
       payload: { driverId: driver.id, vehicleId },
     };

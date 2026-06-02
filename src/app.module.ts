@@ -4,7 +4,10 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 // TypeOrmModule connects to PostgreSQL and registers entities.
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DataSource, type DataSourceOptions } from 'typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+
+import { runAccessBackfill } from './modules/access/access.backfill';
 
 // Shared utilities (CalculatedService, etc.).
 import { CommonModule } from './common/common.module';
@@ -18,6 +21,9 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
 import { AttendanceRulesModule } from './modules/attendance-rules/attendance-rules.module';
 import { TimeSettingsModule } from './modules/time-settings/time-settings.module';
 import { OdometerReading } from './modules/attendance/odometer-reading.entity';
+import { Permission } from './modules/access/permission.entity';
+import { Role } from './modules/access/role.entity';
+import { AccessModule } from './modules/access/access.module';
 // Auth module (JWT login, guards, strategy).
 import { AuthModule } from './modules/auth/auth.module';
 // Driver feature module and entity.
@@ -67,6 +73,25 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     // localhost-based development variables.
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
+      // Custom factory so we can run the RBAC backfill BEFORE TypeORM's
+      // synchronize tries to add a NOT NULL users.roleId column to
+      // existing rows that still carry the legacy `role` enum string.
+      dataSourceFactory: async (options) => {
+        if (!options) {
+          throw new Error('DataSource options were not provided');
+        }
+        const wantsSync = (options as DataSourceOptions & { synchronize?: boolean }).synchronize === true;
+        const ds = new DataSource({
+          ...(options as DataSourceOptions),
+          synchronize: false,
+        });
+        await ds.initialize();
+        await runAccessBackfill(ds);
+        if (wantsSync) {
+          await ds.synchronize();
+        }
+        return ds;
+      },
       useFactory: (config: ConfigService) => {
         const databaseUrl = config.get<string>('DATABASE_URL');
         const sharedOptions = {
@@ -76,6 +101,8 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
             Driver,
             Site,
             User,
+            Role,
+            Permission,
             Attendance,
             AttendanceDay,
             AttendancePunch,
@@ -126,6 +153,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
       },
     }),
     CommonModule,
+    AccessModule,
     // Auth must be imported so /api/auth routes and JwtStrategy are registered.
     AuthModule,
     UsersModule,

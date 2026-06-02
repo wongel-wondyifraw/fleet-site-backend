@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
-import { UserRole } from '../../common/enums';
+import { Repository } from 'typeorm';
+import { ROLE_ADMIN } from '../access/role-keys';
 import { User } from '../users/user.entity';
 
 @Injectable()
@@ -12,24 +12,25 @@ export class NotificationAudienceService {
   ) {}
 
   async resolveRecipients(options: {
-    roles: UserRole[];
+    roles: string[];
     siteName?: string | null;
     includeAdmins?: boolean;
   }): Promise<User[]> {
     const roleSet = new Set(options.roles);
-    if (options.includeAdmins !== false) roleSet.add(UserRole.ADMIN);
+    if (options.includeAdmins !== false) roleSet.add(ROLE_ADMIN);
 
     const qb = this.users
       .createQueryBuilder('u')
+      .innerJoin('u.role', 'role')
       .leftJoinAndSelect('u.sites', 'site')
       .where('u.isActive = true')
-      .andWhere('u.role IN (:...roles)', { roles: [...roleSet] });
+      .andWhere('role.key IN (:...roles)', { roles: [...roleSet] });
 
     if (options.siteName) {
       qb.andWhere(
-        '(u.role = :adminRole OR LOWER(site.name) = LOWER(:siteName))',
+        '(role.key = :adminRole OR LOWER(site.name) = LOWER(:siteName))',
         {
-          adminRole: UserRole.ADMIN,
+          adminRole: ROLE_ADMIN,
           siteName: options.siteName,
         },
       );
@@ -40,8 +41,22 @@ export class NotificationAudienceService {
   }
 
   async activeAdmins(): Promise<User[]> {
-    return this.users.find({
-      where: { role: In([UserRole.ADMIN]), isActive: true },
-    });
+    return this.users
+      .createQueryBuilder('u')
+      .innerJoin('u.role', 'role')
+      .where('u.isActive = true')
+      .andWhere('role.key = :adminKey', { adminKey: ROLE_ADMIN })
+      .getMany();
+  }
+
+  /** Active users whose role grants the given permission slug. */
+  async resolveByPermission(slug: string): Promise<User[]> {
+    return this.users
+      .createQueryBuilder('u')
+      .innerJoin('u.role', 'role')
+      .innerJoin('role.permissions', 'permission')
+      .where('u.isActive = true')
+      .andWhere('permission.slug = :slug', { slug })
+      .getMany();
   }
 }

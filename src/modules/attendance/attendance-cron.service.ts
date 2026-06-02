@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
-import { UserRole } from '../../common/enums';
+import { ROLE_SITE_MANAGER, ROLE_TIME_KEEPER } from '../access/role-keys';
 import { AttendanceRulesService } from '../attendance-rules/attendance-rules.service';
 import {
   NotificationKind,
@@ -67,7 +67,7 @@ export class AttendanceCronService {
           message: `${driver.firstName} ${driver.lastName} has not checked in by ${cutoff}.`,
           href: '/attendance',
           siteName,
-          targetRoles: [UserRole.TIME_KEEPER, UserRole.SITE_MANAGER],
+          targetRoles: [ROLE_TIME_KEEPER, ROLE_SITE_MANAGER],
           dedupeKey: `attendance.missed_check_in:${driver.id}:${today}`,
           payload: {
             driverId: driver.id,
