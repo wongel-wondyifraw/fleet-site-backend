@@ -41,6 +41,9 @@ import { CustomTripRouteModule } from './modules/custom-trip-routes/custom-trip-
 // Site feature module and entity.
 import { Site } from './modules/sites/site.entity';
 import { SiteModule } from './modules/sites/site.module';
+import { SiteHealthSnapshot } from './modules/site-health/site-health-snapshot.entity';
+import { SiteHealthModule } from './modules/site-health/site-health.module';
+import { SiteScoringConfig } from './modules/site-health/site-scoring-config.entity';
 // User feature module and entity (new).
 import { User } from './modules/users/user.entity';
 import { UsersModule } from './modules/users/user.module';
@@ -76,6 +79,8 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
             AppSetting,
             DailyTripTargetOverride,
             CustomTripRoute,
+            SiteHealthSnapshot,
+            SiteScoringConfig,
           ],
           // Also pick up entities registered via forFeature() in child modules.
           autoLoadEntities: true,
@@ -115,6 +120,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     // Auth must be imported so /api/auth routes and JwtStrategy are registered.
     AuthModule,
     UsersModule,
+    SiteHealthModule,
     SiteModule,
     VehicleModule,
     DriverModule,
