@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 
 import { SiteStatus } from '../../common/enums';
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import { CreateSiteDto, SiteQueryDto, UpdateSiteDto } from './site.dto';
 import { SiteService } from './site.service';
 
@@ -21,27 +22,32 @@ export class SiteController {
   constructor(private readonly sites: SiteService) {}
 
   @Get()
+  @RequiresPermissions('sites.read')
   findAll(@Query() query: SiteQueryDto) {
     return this.sites.findAll(query);
   }
 
   @Get('active')
+  @RequiresPermissions('sites.read')
   findActive() {
     return this.sites.findActive();
   }
 
   @Get(':id')
+  @RequiresPermissions('sites.read')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.sites.findOne(id);
   }
 
   @Post()
+  @RequiresPermissions('sites.create')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateSiteDto) {
     return this.sites.create(dto);
   }
 
   @Patch(':id')
+  @RequiresPermissions('sites.update')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateSiteDto,
@@ -50,6 +56,7 @@ export class SiteController {
   }
 
   @Patch(':id/status')
+  @RequiresPermissions('sites.update')
   setStatus(
     @Param('id', ParseUUIDPipe) id: string,
     @Body('status') status: SiteStatus,
@@ -58,6 +65,7 @@ export class SiteController {
   }
 
   @Delete(':id')
+  @RequiresPermissions('sites.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.sites.remove(id);

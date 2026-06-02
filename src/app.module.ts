@@ -6,6 +6,9 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DataSource, type DataSourceOptions } from 'typeorm';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { APP_GUARD } from '@nestjs/core';
+import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 
 import { runAccessBackfill } from './modules/access/access.backfill';
 
@@ -170,6 +173,16 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     TripTargetModule,
     CustomTripRouteModule,
     HealthModule,
+  ],
+  // Apply the JWT + permissions guards globally so every route is
+  // authenticated and gated by default. Handlers opt out of JWT with
+  // @Public() (health/login) and opt in to specific permission slugs with
+  // @RequiresPermissions(...). Routes without slugs still require a valid
+  // JWT but skip the permissions check (used for user-scoped flows like
+  // notifications and /auth/me).
+  providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
   ],
 })
 export class AppModule {}

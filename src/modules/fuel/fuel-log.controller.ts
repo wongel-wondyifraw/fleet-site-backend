@@ -12,6 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import {
   CreateFuelLogDto,
   FuelEfficiencyQueryDto,
@@ -25,11 +26,13 @@ export class FuelLogController {
   constructor(private readonly fuel: FuelLogService) {}
 
   @Get()
+  @RequiresPermissions('fuel.read')
   findAll(@Query() query: FuelLogQueryDto) {
     return this.fuel.findAll(query);
   }
 
   @Get('efficiency/vehicle/:vehicleId')
+  @RequiresPermissions('fuel.read')
   efficiency(
     @Param('vehicleId', ParseUUIDPipe) vehicleId: string,
     @Query() query: FuelEfficiencyQueryDto,
@@ -38,17 +41,20 @@ export class FuelLogController {
   }
 
   @Get(':id')
+  @RequiresPermissions('fuel.read')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.fuel.findOne(id);
   }
 
   @Post()
+  @RequiresPermissions('fuel.create')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateFuelLogDto) {
     return this.fuel.create(dto);
   }
 
   @Patch(':id')
+  @RequiresPermissions('fuel.update')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateFuelLogDto,
@@ -57,6 +63,7 @@ export class FuelLogController {
   }
 
   @Delete(':id')
+  @RequiresPermissions('fuel.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.fuel.remove(id);

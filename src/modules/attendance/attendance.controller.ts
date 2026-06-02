@@ -12,6 +12,7 @@ import {
   Query,
 } from '@nestjs/common';
 
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import {
   AttendanceDriverHistoryQueryDto,
   AttendanceQueryDto,
@@ -38,11 +39,13 @@ export class AttendanceController {
   // ---------------------------------------------------------------------
 
   @Get('roster')
+  @RequiresPermissions('attendance.read')
   getRoster(@Query() query: AttendanceRosterQueryDto) {
     return this.attendance.getRoster(query);
   }
 
   @Get('roster/bulk')
+  @RequiresPermissions('attendance.read')
   getRosterBulk(@Query() query: AttendanceRosterBulkQueryDto) {
     return this.attendance.getRosterBulk(query);
   }
@@ -51,6 +54,7 @@ export class AttendanceController {
   // legacy `:id` routes so Nest doesn't try to ParseUUIDPipe the literal
   // "drivers" segment.
   @Get('drivers/:driverId/history')
+  @RequiresPermissions('attendance.read')
   getDriverHistory(
     @Param('driverId', ParseUUIDPipe) driverId: string,
     @Query() query: AttendanceDriverHistoryQueryDto,
@@ -59,6 +63,7 @@ export class AttendanceController {
   }
 
   @Post('days/:dayId/punches')
+  @RequiresPermissions('attendance.create')
   @HttpCode(HttpStatus.CREATED)
   createPunch(
     @Param('dayId', ParseUUIDPipe) dayId: string,
@@ -68,6 +73,7 @@ export class AttendanceController {
   }
 
   @Patch('days/:dayId')
+  @RequiresPermissions('attendance.update')
   updateDay(
     @Param('dayId', ParseUUIDPipe) dayId: string,
     @Body() dto: UpdateAttendanceDayDtoNew,
@@ -76,6 +82,7 @@ export class AttendanceController {
   }
 
   @Patch('punches/:punchId')
+  @RequiresPermissions('attendance.update')
   updatePunch(
     @Param('punchId', ParseUUIDPipe) punchId: string,
     @Body() dto: UpdateAttendancePunchDto,
@@ -84,6 +91,7 @@ export class AttendanceController {
   }
 
   @Delete('punches/:punchId')
+  @RequiresPermissions('attendance.delete')
   deletePunch(@Param('punchId', ParseUUIDPipe) punchId: string) {
     return this.attendance.voidPunch(punchId);
   }
@@ -93,11 +101,13 @@ export class AttendanceController {
   // ---------------------------------------------------------------------
 
   @Get()
+  @RequiresPermissions('attendance.read')
   findAll(@Query() query: AttendanceQueryDto) {
     return this.attendance.findAll(query);
   }
 
   @Get('summary/employee/:employeeId')
+  @RequiresPermissions('attendance.read')
   summary(
     @Param('employeeId') employeeId: string,
     @Query('from') from?: string,
@@ -107,17 +117,20 @@ export class AttendanceController {
   }
 
   @Get(':id')
+  @RequiresPermissions('attendance.read')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.attendance.findOne(id);
   }
 
   @Post('check-in')
+  @RequiresPermissions('attendance.create')
   @HttpCode(HttpStatus.CREATED)
   checkIn(@Body() dto: CheckInDto) {
     return this.attendance.checkIn(dto);
   }
 
   @Patch(':id/check-out')
+  @RequiresPermissions('attendance.update')
   checkOut(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: CheckOutDto,
@@ -126,6 +139,7 @@ export class AttendanceController {
   }
 
   @Patch(':id')
+  @RequiresPermissions('attendance.update')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateAttendanceDto,
@@ -134,6 +148,7 @@ export class AttendanceController {
   }
 
   @Delete(':id')
+  @RequiresPermissions('attendance.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.attendance.remove(id);

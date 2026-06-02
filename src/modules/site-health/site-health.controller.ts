@@ -4,12 +4,11 @@ import {
   Param,
   ParseUUIDPipe,
   Query,
-  UseGuards,
 } from '@nestjs/common';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import { ROLE_ADMIN } from '../access/role-keys';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { SiteService } from '../sites/site.service';
 import { User } from '../users/user.entity';
 import {
@@ -19,7 +18,6 @@ import {
 import { SiteHealthService } from './site-health.service';
 
 @Controller('sites')
-@UseGuards(JwtAuthGuard)
 export class SiteHealthController {
   constructor(
     private readonly siteHealth: SiteHealthService,
@@ -27,6 +25,7 @@ export class SiteHealthController {
   ) {}
 
   @Get('health')
+  @RequiresPermissions('site-health.read')
   async listHealth(
     @Query() query: SiteHealthListQueryDto,
     @CurrentUser() user: User,
@@ -56,6 +55,7 @@ export class SiteHealthController {
   }
 
   @Get('health/:siteId/history')
+  @RequiresPermissions('site-health.read')
   async history(
     @Param('siteId', ParseUUIDPipe) siteId: string,
     @Query() query: SiteHealthHistoryQueryDto,

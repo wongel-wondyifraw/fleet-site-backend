@@ -11,6 +11,7 @@ import {
   Post,
 } from '@nestjs/common';
 
+import { RequiresPermissions } from '../../common/decorators/permissions.decorator';
 import {
   CreateCustomTripRouteDto,
   UpdateCustomTripRouteDto,
@@ -22,22 +23,26 @@ export class CustomTripRouteController {
   constructor(private readonly service: CustomTripRouteService) {}
 
   @Get()
+  @RequiresPermissions('custom-routes.read')
   findAll() {
     return this.service.findAll();
   }
 
   @Get(':id')
+  @RequiresPermissions('custom-routes.read')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.findOne(id);
   }
 
   @Post()
+  @RequiresPermissions('custom-routes.create')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() dto: CreateCustomTripRouteDto) {
     return this.service.create(dto);
   }
 
   @Patch(':id')
+  @RequiresPermissions('custom-routes.update')
   update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateCustomTripRouteDto,
@@ -46,6 +51,7 @@ export class CustomTripRouteController {
   }
 
   @Delete(':id')
+  @RequiresPermissions('custom-routes.delete')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.service.remove(id);
