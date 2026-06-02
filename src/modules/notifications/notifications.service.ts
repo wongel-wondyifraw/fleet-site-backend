@@ -44,6 +44,10 @@ export interface CreateNotificationInput {
   href?: string;
   payload?: Record<string, unknown>;
   dedupeKey?: string;
+  // Bypasses the per-user master switch / kind gating. Reserved for
+  // diagnostic flows like the "Send test" button so the user can verify
+  // delivery even while their preferences say "off".
+  bypassPreferences?: boolean;
 }
 
 @Injectable()
@@ -159,8 +163,9 @@ export class NotificationsService {
   // settings panel. Skips the dedupe key so the user can fire repeated
   // tests without hitting the unique-index, and routes through the same
   // create() path as real notifications so SSE + push + browser toast
-  // behave identically.
-  async sendTestPush(userId: string): Promise<NotificationApiItem> {
+  // behave identically. Bypasses the master switch + per-kind gate so the
+  // user can verify delivery even while notifications are OFF.
+  async sendTestPush(userId: string): Promise<NotificationApiItem | null> {
     return this.create({
       userId,
       kind: NotificationKind.SYSTEM,
@@ -170,10 +175,24 @@ export class NotificationsService {
         'If you see this, in-app, browser and push delivery are working on this device.',
       href: '/notifications',
       payload: { test: true, sentAt: new Date().toISOString() },
+      bypassPreferences: true,
     });
   }
 
-  async create(input: CreateNotificationInput): Promise<NotificationApiItem> {
+  async create(
+    input: CreateNotificationInput,
+  ): Promise<NotificationApiItem | null> {
+    if (!input.bypassPreferences) {
+      const pref = await this.getPreferences(input.userId);
+      // Master switch off → drop the notification entirely (no bell entry,
+      // no SSE push, no web push). Returning null lets the domain listener
+      // treat this as a silent no-op without throwing.
+      if (!pref.notificationsEnabled) return null;
+      // Per-kind in-app gate: if the user explicitly muted this kind we
+      // also skip creation so the bell never accrues unread entries the
+      // user opted out of.
+      if (pref.inAppPerKind[input.kind] === false) return null;
+    }
     this.guardCreationRate(input.userId);
     const entity = this.notifications.create({
       userId: input.userId,
@@ -294,8 +313,13 @@ export class NotificationsService {
   async getPreferences(userId: string): Promise<NotificationPreference> {
     let pref = await this.preferences.findOne({ where: { userId } });
     if (pref) return pref;
+    // Default new users to "off". The settings panel's master switch is
+    // the single explicit opt-in; until that flag is true we don't create
+    // any notifications for the user, so the per-kind maps below are
+    // there purely so flipping the switch ON has sensible defaults.
     pref = this.preferences.create({
       userId,
+      notificationsEnabled: false,
       inAppPerKind: this.defaultKindMap(true),
       osToastPerKind: this.defaultKindMap(true),
       webPushPerKind: this.defaultKindMap(true),
@@ -310,6 +334,9 @@ export class NotificationsService {
     dto: UpdateNotificationPreferencesDto,
   ): Promise<NotificationPreference> {
     const current = await this.getPreferences(userId);
+    if (dto.notificationsEnabled !== undefined) {
+      current.notificationsEnabled = dto.notificationsEnabled;
+    }
     current.inAppPerKind = { ...current.inAppPerKind, ...(dto.inAppPerKind ?? {}) };
     current.osToastPerKind = {
       ...current.osToastPerKind,

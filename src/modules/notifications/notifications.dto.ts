@@ -57,6 +57,10 @@ export class UnregisterPushSubscriptionDto {
 
 export class UpdateNotificationPreferencesDto {
   @IsOptional()
+  @IsBoolean()
+  notificationsEnabled?: boolean;
+
+  @IsOptional()
   @IsObject()
   inAppPerKind?: Record<string, boolean>;
 
