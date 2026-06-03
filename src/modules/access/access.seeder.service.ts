@@ -113,18 +113,41 @@ export class AccessSeederService implements OnModuleInit {
         await this.roles.save(role);
       }
 
-      const hasNoPermissions = (role.permissions?.length ?? 0) === 0;
-      const shouldSyncPerms = isNew || reseed || hasNoPermissions;
+      const desiredSlugs =
+        def.permissionSlugs === '*'
+          ? allSlugs
+          : def.permissionSlugs.filter((s) => slugToPermission.has(s));
+
+      const currentSlugs = new Set(
+        (role.permissions ?? []).map((p) => p.slug),
+      );
+
+      // Wildcard ("*") roles such as ADMIN must always hold every catalog
+      // permission. When the catalog grows on an existing install, the role
+      // already has permissions so the normal sync below would skip it,
+      // silently leaving ADMIN without newly-added slugs like
+      // `sites.bypass-scope` — which scopes the admin to zero sites. Detect
+      // that gap and always backfill it, independent of RBAC_RESEED_SYSTEM.
+      const isWildcard = def.permissionSlugs === '*';
+      const wildcardMissingPerms =
+        isWildcard && desiredSlugs.some((s) => !currentSlugs.has(s));
+
+      const hasNoPermissions = currentSlugs.size === 0;
+      const shouldSyncPerms =
+        isNew || reseed || hasNoPermissions || wildcardMissingPerms;
       if (shouldSyncPerms) {
-        const slugs =
-          def.permissionSlugs === '*'
-            ? allSlugs
-            : def.permissionSlugs.filter((s) => slugToPermission.has(s));
-        const perms = slugs.map((s) => slugToPermission.get(s)!);
+        const perms = desiredSlugs.map((s) => slugToPermission.get(s)!);
         role.permissions = perms;
         await this.roles.save(role);
+        const reason = reseed
+          ? ' (RBAC_RESEED_SYSTEM)'
+          : wildcardMissingPerms
+            ? ' (wildcard backfill)'
+            : hasNoPermissions
+              ? ' (empty role)'
+              : '';
         this.logger.log(
-          `Synced ${perms.length} permission(s) onto system role ${def.key}${reseed ? ' (RBAC_RESEED_SYSTEM)' : hasNoPermissions ? ' (empty role)' : ''}`,
+          `Synced ${perms.length} permission(s) onto system role ${def.key}${reason}`,
         );
       }
     }
