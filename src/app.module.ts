@@ -36,6 +36,7 @@ import { Driver } from './modules/drivers/driver.entity';
 import { DriverModule } from './modules/drivers/driver.module';
 // Health module exposes "/" and "/health" for Render's probe and uptime monitors.
 import { HealthModule } from './modules/health/health.module';
+import { ReportModule } from './modules/reports/report.module';
 // Fuel log feature module and entity.
 import { FuelLog } from './modules/fuel/fuel-log.entity';
 import { FuelModule } from './modules/fuel/fuel.module';
@@ -176,6 +177,7 @@ import { VehicleModule } from './modules/vehicles/vehicle.module';
     TripModule,
     TripTargetModule,
     CustomTripRouteModule,
+    ReportModule,
     HealthModule,
   ],
   // Apply the JWT + permissions guards globally so every route is

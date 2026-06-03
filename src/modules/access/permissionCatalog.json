@@ -56,5 +56,7 @@
   { "slug": "time-settings.create", "name": "Create time settings", "category": "Time Settings", "description": "Initialize time settings" },
   { "slug": "time-settings.update", "name": "Update time settings", "category": "Time Settings", "description": "Change timezone and format" },
   { "slug": "time-settings.delete", "name": "Delete time settings", "category": "Time Settings", "description": "Reset time settings" },
+  { "slug": "reports.read", "name": "View reports", "category": "Reports", "description": "View fleet activity reports" },
+  { "slug": "reports.export", "name": "Export reports", "category": "Reports", "description": "Export fleet activity reports to Excel or PDF" },
   { "slug": "reports.digest.receive", "name": "Receive 6-hour reports digest", "category": "Reports", "description": "Subscribes the user to the automated digest of activity across all sites for the past 6 hours." }
 ]

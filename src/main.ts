@@ -50,7 +50,13 @@ async function bootstrap() {
     ],
   });
   // Allow browser clients (frontend) to call the API with credentials.
-  app.enableCors({ origin: true, credentials: true });
+  // Expose Content-Disposition so file-export downloads (Excel/PDF reports)
+  // can read the server-suggested filename cross-origin.
+  app.enableCors({
+    origin: true,
+    credentials: true,
+    exposedHeaders: ['Content-Disposition'],
+  });
 
   // Log every HTTP request/response (passwords redacted). Set LOG_HTTP=false to
   // disable. Set LOG_HTTP_BODY=false to skip POST/PATCH bodies.

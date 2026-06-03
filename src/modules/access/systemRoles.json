@@ -22,6 +22,8 @@
       "custom-routes.read", "custom-routes.create", "custom-routes.update", "custom-routes.delete",
       "attendance-rules.read", "attendance-rules.update",
       "time-settings.read",
+      "reports.read",
+      "reports.export",
       "reports.digest.receive"
     ]
   },
