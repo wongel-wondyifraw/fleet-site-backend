@@ -203,6 +203,19 @@ export class SiteHealthService {
     });
   }
 
+  /** Single query for dashboard sparklines across many sites. */
+  async listHistoryForSites(
+    siteIds: string[],
+    from: string,
+    to: string,
+  ): Promise<SiteHealthSnapshot[]> {
+    if (siteIds.length === 0) return [];
+    return this.snapshots.find({
+      where: { siteId: In(siteIds), date: Between(from, to) },
+      order: { siteId: 'ASC', date: 'ASC' },
+    });
+  }
+
   assertSiteAccess(user: User, siteIds: string[]): string[] {
     return this.siteScope.assertAccess(user, siteIds);
   }

@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsDateString,
+  IsInt,
   IsNumber,
   IsOptional,
   IsUUID,
@@ -25,6 +26,23 @@ export class SiteHealthHistoryQueryDto {
 
   @IsDateString()
   to!: string;
+}
+
+/** Batched current score + rolling history for dashboard overview. */
+export class SiteHealthOverviewQueryDto {
+  @IsDateString()
+  date!: string;
+
+  /** Comma-separated site UUIDs. */
+  @IsOptional()
+  siteIds?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(31)
+  historyDays?: number;
 }
 
 export class SiteScoringWeightsDto {

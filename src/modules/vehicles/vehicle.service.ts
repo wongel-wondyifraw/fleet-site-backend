@@ -88,7 +88,16 @@ export class VehicleService implements OnModuleInit {
   async findAllLookup(user: User): Promise<
     Pick<
       Vehicle,
-      'id' | 'assetNumber' | 'plateNumber' | 'type' | 'status' | 'siteId'
+      | 'id'
+      | 'assetNumber'
+      | 'plateNumber'
+      | 'type'
+      | 'status'
+      | 'fuelType'
+      | 'fuelCapacity'
+      | 'mileage'
+      | 'currentOdometer'
+      | 'siteId'
     >[]
   > {
     const qb = this.repo
@@ -99,6 +108,10 @@ export class VehicleService implements OnModuleInit {
         'vehicle.plateNumber',
         'vehicle.type',
         'vehicle.status',
+        'vehicle.fuelType',
+        'vehicle.fuelCapacity',
+        'vehicle.mileage',
+        'vehicle.currentOdometer',
         'vehicle.siteId',
       ])
       .orderBy('vehicle.assetNumber', 'ASC')

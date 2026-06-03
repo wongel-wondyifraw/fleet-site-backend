@@ -112,6 +112,12 @@ export class DriverService implements OnModuleInit {
       | 'firstName'
       | 'lastName'
       | 'employeeId'
+      | 'licenseNumber'
+      | 'licenseClass'
+      | 'licenseExpiry'
+      | 'phoneNumber'
+      | 'email'
+      | 'hireDate'
       | 'assignedVehicleId'
       | 'status'
       | 'siteId'
@@ -124,6 +130,12 @@ export class DriverService implements OnModuleInit {
         'driver.firstName',
         'driver.lastName',
         'driver.employeeId',
+        'driver.licenseNumber',
+        'driver.licenseClass',
+        'driver.licenseExpiry',
+        'driver.phoneNumber',
+        'driver.email',
+        'driver.hireDate',
         'driver.assignedVehicleId',
         'driver.status',
         'driver.siteId',
