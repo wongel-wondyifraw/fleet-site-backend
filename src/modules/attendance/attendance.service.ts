@@ -1048,6 +1048,21 @@ export class AttendanceService {
     }
   }
 
+  // Human-readable lateness: under an hour stays in minutes, otherwise we
+  // roll it up into "Nh Mm" form (e.g. 125 -> "2 hours 5 minutes") so the
+  // notification doesn't read as an awkward triple-digit minute count.
+  private formatLateDuration(totalMinutes: number): string {
+    const minutes = Math.max(0, Math.round(totalMinutes));
+    if (minutes < 60) {
+      return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+    }
+    const hours = Math.floor(minutes / 60);
+    const remMinutes = minutes % 60;
+    const hourPart = `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
+    if (remMinutes === 0) return hourPart;
+    return `${hourPart} ${remMinutes} ${remMinutes === 1 ? 'minute' : 'minutes'}`;
+  }
+
   private async maybeEmitLateCheckIn(
     day: AttendanceDay,
     punchAt: Date,
@@ -1078,7 +1093,7 @@ export class AttendanceService {
       kind: NotificationKind.ATTENDANCE,
       severity: NotificationSeverity.WARNING,
       title: 'Driver checked in late',
-      message: `${driverName} checked in ${lateMinutes} minutes after ${rules.dayInTime}.`,
+      message: `${driverName} checked in ${this.formatLateDuration(lateMinutes)} after ${rules.dayInTime}.`,
       href: '/attendance',
       siteName,
       targetRoles: [ROLE_TIME_KEEPER, ROLE_SITE_MANAGER],

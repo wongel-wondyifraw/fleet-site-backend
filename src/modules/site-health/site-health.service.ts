@@ -14,6 +14,7 @@ import {
   NOTIFICATION_EVENT,
   NotificationDomainEvent,
 } from '../notifications/notification-events';
+import { Site } from '../sites/site.entity';
 import { Trip } from '../trips/trip.entity';
 import { User } from '../users/user.entity';
 import { Vehicle } from '../vehicles/vehicle.entity';
@@ -33,6 +34,8 @@ export class SiteHealthService {
     private readonly vehicles: Repository<Vehicle>,
     @InjectRepository(Trip)
     private readonly trips: Repository<Trip>,
+    @InjectRepository(Site)
+    private readonly sites: Repository<Site>,
     private readonly attendance: AttendanceService,
     private readonly attendanceRules: AttendanceRulesService,
     private readonly fuelConsumption: FuelConsumptionService,
@@ -135,14 +138,21 @@ export class SiteHealthService {
 
     const saved = await this.snapshots.save(entity);
     if (saved.status === 'CRITICAL') {
+      // save() doesn't hydrate the `site` relation, so resolve the name
+      // explicitly to avoid falling back to the raw site UUID in the message.
+      const site = await this.sites.findOne({
+        where: { id: saved.siteId },
+        select: ['id', 'name'],
+      });
+      const siteName = site?.name ?? saved.siteId;
       const event: NotificationDomainEvent = {
         eventName: 'site_health.score_dropped',
         kind: NotificationKind.SITE_HEALTH,
         severity: NotificationSeverity.DANGER,
         title: 'Site health critical',
-        message: `Site ${saved.site?.name ?? saved.siteId} dropped to CRITICAL on ${saved.date}.`,
+        message: `Site ${siteName} dropped to CRITICAL on ${saved.date}.`,
         href: '/sites',
-        siteName: saved.site?.name ?? null,
+        siteName: site?.name ?? null,
         siteId: saved.siteId,
         targetRoles: ['SITE_MANAGER'],
         dedupeKey: `site_health.critical:${saved.siteId}:${saved.date}`,
